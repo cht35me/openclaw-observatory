@@ -11,7 +11,16 @@ supervisor a single place to answer: **what is the fleet doing, is it healthy, a
 anything need my attention?**
 
 The project is currently in its **documentation and architecture foundation phase**
-(Mission M001). No production code exists yet, by design.
+(Mission M001). No production code exists yet, by design. The supervisor's M001 review
+is complete: architecture and technology decisions **SD-001…SD-012** are recorded in
+[docs/decisions/](docs/decisions/README.md).
+
+The Observatory is designed in two variants
+([SD-001](docs/decisions/SD-001-central-and-local-observability.md)):
+
+- **Central Observability** — the full platform on a VPS: ClickHouse storage, React SPA
+  dashboard, Python backend, Tailscale networking.
+- **Local Observability** — a minimal on-host version: SQLite storage, thin web UI.
 
 ## Purpose
 
@@ -61,9 +70,11 @@ None of these are implemented yet. See [docs/roadmap.md](docs/roadmap.md).
 ## Current Project Phase
 
 **M001 — Documentation and governance foundation.** This repository currently contains
-only documentation: vision, requirements, architecture proposal, roadmap, security
-strategy, deployment strategy, fleet identity model, and agent governance. Implementation
-begins only after human review and approval of this foundation.
+only documentation: vision, requirements, architecture, roadmap, security strategy,
+deployment strategy, fleet identity model, agent governance, and supervisor decision
+records. The supervisor review of the M001 foundation produced decisions SD-001…SD-012
+([docs/decisions/](docs/decisions/README.md)). Implementation begins only after the
+M001 PR is approved and merged.
 
 ## Repository Structure
 
@@ -82,7 +93,8 @@ Current (M001):
     ├── architecture.md         # Proposed high-level architecture
     ├── roadmap.md              # Staged development milestones
     ├── security.md             # Security strategy and threat model
-    └── deployment.md           # Intended deployment lifecycle
+    ├── deployment.md           # Intended deployment lifecycle
+    └── decisions/              # Supervisor decision records (SD-NNN-name.md)
 ```
 
 The proposed future structure (backend, frontend, collectors, schemas, infra, tests) is
@@ -121,7 +133,8 @@ M001. See [docs/deployment.md](docs/deployment.md).
 | [ENGINEERING_PRINCIPLES.md](ENGINEERING_PRINCIPLES.md) | Permanent engineering principles |
 | [docs/vision.md](docs/vision.md) | Long-term Mission Control vision |
 | [docs/requirements.md](docs/requirements.md) | Requirements: M001, MVP, future, out of scope |
-| [docs/architecture.md](docs/architecture.md) | Proposed architecture and trade-offs |
+| [docs/architecture.md](docs/architecture.md) | Architecture, decisions, and trade-offs |
+| [docs/decisions/](docs/decisions/README.md) | Supervisor decision records (SD-001…SD-012) |
 | [docs/roadmap.md](docs/roadmap.md) | Staged milestones with dependencies and gates |
 | [docs/security.md](docs/security.md) | Threat model and security strategy |
 | [docs/deployment.md](docs/deployment.md) | Deployment lifecycle and operations |

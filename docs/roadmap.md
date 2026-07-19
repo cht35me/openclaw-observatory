@@ -21,14 +21,24 @@ deployment strategy, fleet identity model, agent governance, engineering princip
 
 Supervisor reviews the M001 PR and the open questions in
 [architecture.md](architecture.md) (database, time-series approach, backend language,
-networking). Implementation may begin only after this gate. Outcome: approved technology
-choices recorded in `docs/`.
+networking). Implementation may begin only after this gate.
+
+**Status: supervisor review received (2026-07-19).** Decisions SD-001…SD-012 are
+recorded in [docs/decisions/](decisions/README.md): two Observatory variants
+(central + local, SD-001), push collectors (SD-002), Tailscale (SD-003/SD-012),
+versioned REST API (SD-004), ClickHouse central / SQLite local (SD-005/SD-009),
+React SPA central / thin UI local (SD-006), privileged control required (SD-007),
+plugin architecture from day one (SD-008), relational time-series first with
+Prometheus later (SD-010), and Python backend (SD-011). The gate closes when the
+M001 PR is approved and merged by the supervisor.
 
 ## Phase 1 — Core Observatory Backend
 
-**Scope:** minimal service skeleton on the chosen stack: versioned REST ingestion API,
-authentication for collectors, relational storage, event model, structured logging,
-health endpoint, self-metrics. No UI yet beyond raw API.
+**Scope:** minimal service skeleton on the decided stack (**Python** backend per
+[SD-011](decisions/SD-011-python-backend.md), **ClickHouse** storage per
+[SD-005](decisions/SD-005-clickhouse-central-sqlite-local.md)): versioned REST
+ingestion API, authentication for collectors, storage layer, event model, structured
+logging, health endpoint, self-metrics. No UI yet beyond raw API.
 **Dependencies:** G1.
 **Gate:** code review + demonstrated ingestion of a synthetic payload; security checklist
 from [security.md](security.md) applied.
@@ -56,7 +66,9 @@ identity; offline detection demonstrated.
    status).
 2. **Claude/API usage** (tokens, estimated cost per agent).
 3. **Initial frontend dashboard** (fleet overview: agents, hosts, missions, PRs, alerts;
-   server-rendered MVP per [architecture.md](architecture.md)).
+   **React SPA** for the Central Observatory per
+   [SD-006](decisions/SD-006-react-spa-central-thin-ui-local.md); may start with a
+   minimal feature set and grow, but on the SPA stack from the start).
 4. **Dashboard authentication** (supervisor login).
 
 **Dependencies:** Phase 2 (registry + mission data to display).
@@ -89,9 +101,13 @@ backup demonstrated once.
 
 1. **Bitaxe integration** (miner status collector + dashboard module — first proof of
    the plugin model).
-2. **Multi-agent expansion** (A002+; possibly a second framework prefix per
+2. **Local Observability variant** (minimal on-host Observatory: SQLite storage, thin
+   web UI, shared schemas — per
+   [SD-001](decisions/SD-001-central-and-local-observability.md); may be pulled
+   earlier at a gate if operational need arises).
+3. **Multi-agent expansion** (A002+; possibly a second framework prefix per
    [FLEET.md](../FLEET.md); mission queue visibility).
-3. **Additional hosts/platforms** (VPS collectors beyond the Observatory host,
+4. **Additional hosts/platforms** (VPS collectors beyond the Observatory host,
    workstations).
 
 **Dependencies:** Phase 5 stability; commissioning process from [FLEET.md](../FLEET.md).

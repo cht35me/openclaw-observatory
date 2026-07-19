@@ -10,6 +10,11 @@ Requirements are grouped by scope stage:
 Requirement IDs (`FR-x`, `NFR-x`, `SEC-x`) are stable and may be referenced by later
 missions.
 
+Supervisor decisions SD-001…SD-012 ([docs/decisions/](decisions/README.md)) resolve
+the technology choices behind these requirements: two Observatory variants (central +
+local), ClickHouse/SQLite storage, React SPA / thin web UI, Python backend, Tailscale,
+and a required (late-phase, human-gated) privileged control surface.
+
 ## 1. Functional Requirements
 
 ### Fleet Registry
@@ -65,7 +70,8 @@ missions.
 ### Dashboard
 
 - **FR-19 [MVP]** A web dashboard showing fleet overview: agents, status, current
-  missions, host health, active PRs, recent alerts.
+  missions, host health, active PRs, recent alerts. For the Central Observatory this is
+  a React SPA per [SD-006](decisions/SD-006-react-spa-central-thin-ui-local.md).
 - **FR-20 [Future]** Drill-down views, historical charts, mission history, cost views.
 
 ### Integrations
@@ -79,6 +85,11 @@ missions.
 - **FR-23 [MVP]** New telemetry types can be added without breaking existing collectors
   (versioned API, tolerant schemas).
 - **FR-24 [Future]** Plugin/module mechanism for new collectors and dashboard panels.
+  Schemas and API contracts are plugin-oriented from day one per
+  [SD-008](decisions/SD-008-plugin-architecture-day-one.md).
+- **FR-25 [Future]** Local Observability variant: a minimal on-host Observatory
+  (SQLite storage, thin web UI, shared schemas) per
+  [SD-001](decisions/SD-001-central-and-local-observability.md).
 
 ## 2. Non-Functional Requirements
 
@@ -90,7 +101,9 @@ missions.
 - **SEC-3 [MVP]** No secrets in the repository or in telemetry payloads.
 - **SEC-4 [MVP]** Human approval gates for anything beyond read-only observation.
 - **SEC-5 [Future]** Role-based authorization for additional users; privileged control
-  surface with separate authentication.
+  surface with separate authentication — a **required** capability per
+  [SD-007](decisions/SD-007-privileged-control-required.md), still late-phase and
+  human-gated.
 
 ### Reliability
 

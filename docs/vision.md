@@ -31,9 +31,22 @@ workstations later). A central, always-on service:
 - serves the dashboard from one authoritative place;
 - keeps observability *outside* the machines being observed.
 
-Communication between hosts happens over a private network (Tailscale or similar) rather
-than the public internet. See [architecture.md](architecture.md) and
-[deployment.md](deployment.md).
+Communication between hosts happens over a private network (Tailscale, per
+[SD-003](decisions/SD-003-tailscale-networking.md)) rather than the public internet.
+See [architecture.md](architecture.md) and [deployment.md](deployment.md).
+
+## Two Deployment Variants
+
+Per supervisor decision [SD-001](decisions/SD-001-central-and-local-observability.md),
+the Observatory is designed in two versions:
+
+- **Central Observability** — the full, world-class platform on a VPS: fleet-wide
+  scope, ClickHouse storage, React SPA dashboard, pollers, and alerting.
+- **Local Observability** — a minimal software version on each local host: host-scoped,
+  SQLite storage, thin web UI; useful when the central Observatory is unreachable or
+  not yet deployed.
+
+Both variants share the same telemetry contracts and schemas.
 
 ## Multi-Platform Support
 
@@ -75,7 +88,9 @@ The long-term trajectory runs from *seeing* to *safely acting*:
    source of truth.
 4. **Control** (much later, human-gated): privileged actions such as pausing an agent or
    approving a mission — only with strong authentication, explicit human confirmation,
-   and full audit trails.
+   and full audit trails. Per [SD-007](decisions/SD-007-privileged-control-required.md),
+   privileged control is a **required** capability, not an optional aspiration — while
+   remaining late-phase and human-gated.
 
 ## Boundaries Between Monitoring and Privileged Control
 

@@ -29,6 +29,26 @@ M003
 - An agent works on one active mission at a time unless explicitly instructed otherwise.
 - Unassigned work is out of scope; agents may *propose* missions but not self-assign.
 
+### Mission Acceptance Response (required)
+
+When accepting a mission or supervisor instruction, the agent always responds in this
+format before starting work:
+
+```text
+- Mission received.
+- Estimated complexity:
+- Estimated duration:
+- Execution plan:
+- Starting now...
+```
+
+### Supervisor Decisions
+
+- Supervisor decisions are marked **SD-NNN**, where NNN is an integer sequence.
+- Every decision is recorded as `docs/decisions/SD-NNN-name.md` (NAME = decision
+  subject) in the same PR that acts on it. See
+  [docs/decisions/](docs/decisions/README.md).
+
 ## Mission States
 
 ```text
