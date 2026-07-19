@@ -86,7 +86,7 @@ Current (M001):
 ```
 
 The proposed future structure (backend, frontend, collectors, schemas, infra, tests) is
-documented in [docs/architecture.md](docs/architecture.md#proposed-repository-structure).
+documented in [docs/architecture.md](docs/architecture.md#5-proposed-repository-structure).
 Implementation directories are intentionally not created until they contain real work.
 
 ## Development Workflow
