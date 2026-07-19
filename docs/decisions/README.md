@@ -1,0 +1,21 @@
+# Supervisor Decisions
+
+Architecture and technology decisions made by the fleet supervisor. Each decision is
+recorded as `SD-NNN-name.md`, where `NNN` is an integer sequence and `name` is the
+decision subject. Decisions are immutable once approved; a decision is changed only by
+a new decision that supersedes it.
+
+| ID | Subject | Status |
+| --- | --- | --- |
+| [SD-001](SD-001-central-and-local-observability.md) | Central and Local observability variants | Approved |
+| [SD-002](SD-002-push-based-collectors.md) | Push-based collectors | Approved |
+| [SD-003](SD-003-tailscale-networking.md) | Private networking via Tailscale | Approved |
+| [SD-004](SD-004-rest-api.md) | Versioned REST/JSON API | Approved |
+| [SD-005](SD-005-clickhouse-central-sqlite-local.md) | ClickHouse (central), SQLite (local) | Approved |
+| [SD-006](SD-006-react-spa-central-thin-ui-local.md) | React SPA (central), thin web UI (local) | Approved |
+| [SD-007](SD-007-privileged-control-required.md) | Privileged control is required | Approved |
+| [SD-008](SD-008-plugin-architecture-day-one.md) | Plugin architecture from day one | Approved |
+| [SD-009](SD-009-database-follows-sd-005.md) | Database for MVP → SD-005 | Approved |
+| [SD-010](SD-010-relational-time-series-first.md) | Relational time-series first; Prometheus later | Approved |
+| [SD-011](SD-011-python-backend.md) | Backend language: Python | Approved |
+| [SD-012](SD-012-networking-follows-sd-003.md) | Tailscale vs. WireGuard → SD-003 | Approved |
