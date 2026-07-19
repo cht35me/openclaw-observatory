@@ -10,10 +10,12 @@ information from agents, hosts, repositories, and supporting services, giving a 
 supervisor a single place to answer: **what is the fleet doing, is it healthy, and does
 anything need my attention?**
 
-The project is currently in its **documentation and architecture foundation phase**
-(Mission M001). No production code exists yet, by design. The supervisor's M001 review
-is complete: architecture and technology decisions **SD-001…SD-012** are recorded in
-[docs/decisions/](docs/decisions/README.md).
+The M001 foundation phase (documentation, architecture, governance) is complete:
+architecture and technology decisions **SD-001…SD-012** are recorded in
+[docs/decisions/](docs/decisions/README.md). Mission **M002** delivers the first
+production code: the core backend skeleton in [backend/](backend/) — an authenticated,
+versioned ingestion API backed by ClickHouse, with health, metrics, and structured
+logging. See [Backend Service](#backend-service-m002).
 
 The Observatory is designed in two variants
 ([SD-001](docs/decisions/SD-001-central-and-local-observability.md)):
@@ -65,20 +67,81 @@ See [docs/vision.md](docs/vision.md) for the full vision.
 - Alerting: notify the supervisor (e.g., via Telegram) only when attention is required
 - Plugin modules for future capabilities
 
-None of these are implemented yet. See [docs/roadmap.md](docs/roadmap.md).
+The foundation for these — the ingestion API and storage layer — exists as of M002;
+the capabilities themselves arrive in later missions. See [docs/roadmap.md](docs/roadmap.md).
 
 ## Current Project Phase
 
-**M001 — Documentation and governance foundation.** This repository currently contains
-only documentation: vision, requirements, architecture, roadmap, security strategy,
-deployment strategy, fleet identity model, agent governance, and supervisor decision
-records. The supervisor review of the M001 foundation produced decisions SD-001…SD-012
-([docs/decisions/](docs/decisions/README.md)). Implementation begins only after the
-M001 PR is approved and merged.
+**M002 — Core Observatory backend skeleton (Phase 1).** The M001 documentation
+foundation (vision, requirements, architecture, roadmap, security strategy, deployment
+strategy, governance, decisions SD-001…SD-012) is merged. M002 adds the first
+executable backend: FastAPI service, ClickHouse storage, collector API-key
+authentication, Prometheus metrics, structured JSON logging, tests, and Docker
+packaging.
+
+## Backend Service (M002)
+
+The backend lives in [backend/](backend/): a Python 3.13 / FastAPI service that
+accepts authenticated telemetry events over a versioned REST API (SD-004) and stores
+them in ClickHouse (SD-005). See [backend/OPEN_QUESTIONS.md](backend/OPEN_QUESTIONS.md)
+for implementation notes awaiting supervisor rulings.
+
+### One-command startup (Docker)
+
+```bash
+cp .env.example .env    # then replace every placeholder value
+docker compose up
+```
+
+This starts ClickHouse (internal-only; no host port) and the backend on
+`127.0.0.1:8000` by default. Real secrets belong only in the untracked `.env`.
+
+### Endpoints
+
+| Endpoint | Auth | Description |
+| --- | --- | --- |
+| `GET /health` | none | Status (`ok`/`degraded`), version, uptime, DB connectivity. Always HTTP 200; a DB outage flips `status` to `degraded` (a liveness probe must not restart a healthy API process). |
+| `GET /metrics` | none | Prometheus metrics: request count/latency, ingestion successes/failures, DB latency. |
+| `POST /api/v1/events` | `X-API-Key` | Ingest one telemetry event (strictly validated JSON). Returns `202` with the assigned event UUID. |
+
+Example ingestion:
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/api/v1/events \
+  -H 'Content-Type: application/json' \
+  -H 'X-API-Key: <one of API_KEYS>' \
+  -d '{"collector_id":"demo","timestamp":"2026-07-19T12:00:00Z","event_type":"synthetic","payload":{"temperature":41,"status":"ok"}}'
+```
+
+### Environment variables
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `CLICKHOUSE_HOST` | `localhost` | ClickHouse hostname (`clickhouse` inside compose) |
+| `CLICKHOUSE_PORT` | `8123` | ClickHouse HTTP port |
+| `CLICKHOUSE_DATABASE` | `observatory` | Database (created on startup if missing) |
+| `CLICKHOUSE_USERNAME` | `default` | Database user (`observatory` in compose) |
+| `CLICKHOUSE_PASSWORD` | *(empty)* | Database password — secret, env-only |
+| `API_KEYS` | *(empty ⇒ reject all)* | Accepted collector keys: comma-separated or JSON array — secret, env-only |
+| `LOG_LEVEL` | `INFO` | Structured-log level |
+| `APP_VERSION` | `0.1.0` | Version reported by `/health` and metrics |
+| `MAX_REQUEST_BYTES` | `1048576` | Request body size limit (middleware-enforced) |
+
+### Local development and tests
+
+```bash
+cd backend
+python3 -m venv .venv
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m pytest            # ClickHouse integration tests auto-skip if no server
+.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000   # run against env config
+```
+
+The test suite runs entirely offline using an in-memory storage backend; tests in
+`tests/test_clickhouse_integration.py` execute only when a ClickHouse server is
+reachable (e.g. via `docker compose up clickhouse`).
 
 ## Repository Structure
-
-Current (M001):
 
 ```text
 .
@@ -87,6 +150,14 @@ Current (M001):
 ├── MISSION.md                  # Reusable mission lifecycle and governance
 ├── FLEET.md                    # Fleet identity model and registry
 ├── ENGINEERING_PRINCIPLES.md   # Permanent engineering principles
+├── docker-compose.yml          # Development stack: backend + ClickHouse
+├── .env.example                # Configuration template (placeholders only)
+├── backend/                    # Observatory backend service (M002)
+│   ├── app/                    # FastAPI application (api/, storage/, models/)
+│   ├── tests/                  # Pytest suite (offline; CH integration auto-skips)
+│   ├── Dockerfile              # Slim, non-root container image
+│   ├── requirements*.txt       # Pinned dependencies
+│   └── OPEN_QUESTIONS.md       # M002 notes awaiting supervisor rulings
 └── docs/
     ├── vision.md               # Mission Control vision
     ├── requirements.md         # Functional and non-functional requirements
@@ -97,9 +168,9 @@ Current (M001):
     └── decisions/              # Supervisor decision records (SD-NNN-name.md)
 ```
 
-The proposed future structure (backend, frontend, collectors, schemas, infra, tests) is
-documented in [docs/architecture.md](docs/architecture.md#5-proposed-repository-structure).
-Implementation directories are intentionally not created until they contain real work.
+The full target structure (frontend, collectors, schemas, infra, tests) is documented
+in [docs/architecture.md](docs/architecture.md#5-proposed-repository-structure).
+Implementation directories are created only when they receive real content.
 
 ## Development Workflow
 
