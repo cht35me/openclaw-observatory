@@ -5,9 +5,10 @@ pattern ([backend/OPEN_QUESTIONS.md](../backend/OPEN_QUESTIONS.md)). Where a
 call is architectural, it is additionally recorded as a **Proposed** decision
 in [docs/decisions/](decisions/README.md) per the M003 supervisor guidance.
 
-**Status 2026-07-20:** all six questions received supervisor direction in the
-pre-PR review pass; the resolutions below are implemented on the PR 1 branch
-and await formal confirmation at Gate G3.
+**Status 2026-07-21:** all six questions received supervisor direction in the
+pre-PR review passes; the resolutions below are implemented on the PR 1
+branch. The final review passed and SD-018/SD-019 were **Accepted** by the
+supervisor at the Gate G3 review.
 
 > **PR split (supervisor-defined):**
 > **PR 1** — Fleet Registry; mission persistence and projections; heartbeat
@@ -50,15 +51,16 @@ Implemented as versioned rows on `ReplacingMergeTree(revision)`.
 row versions at query time — correctness **never depends on background
 merges**; a new revision is visible on the next read. `revision` is
 `time.time_ns()` with per-backend write serialization, so it is strictly
-increasing per key. Details: [SD-018](decisions/SD-018-clickhouse-versioned-row-state.md)
-(final wording, Status: Proposed — supervisor flips to Approved at review).
+increasing per key — valid under SD-018's explicit single-writer assumption.
+Details: [SD-018](decisions/SD-018-clickhouse-versioned-row-state.md)
+(Status: **Accepted**, supervisor, 2026-07-21).
 
 ## 3. Standard-library-only collectors → SD-019 — **RESOLVED (wording final, approval at G3)**
 
 Collectors run on fleet hosts with zero third-party dependencies. The
 deployable collector package ships in PR 2; SD-019 governs it.
-Details: [SD-019](decisions/SD-019-stdlib-only-collectors.md) (final wording,
-Status: Proposed).
+Details: [SD-019](decisions/SD-019-stdlib-only-collectors.md)
+(Status: **Accepted**, supervisor, 2026-07-21).
 
 ## 4. Read-API authentication — **RESOLVED: authenticated identity reads, reconciled with SD-017**
 

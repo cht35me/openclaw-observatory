@@ -1,6 +1,6 @@
 # SD-019 — Collectors Are Standard-Library-Only Python
 
-- **Status:** Proposed (final wording for Gate G3 approval)
+- **Status:** Accepted (supervisor, Gate G3 review, 2026-07-21)
 - **Date:** 2026-07-20
 - **Proposed by:** A001-OC01-RPSG01 (Mission M003)
 - **Context:** M003 delivers the first production collectors (Raspberry Pi
