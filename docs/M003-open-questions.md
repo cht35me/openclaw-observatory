@@ -144,5 +144,68 @@ authoritatively create or mutate canonical mission records.**
 
 ---
 
-Written under Mission M003 by A001-OC01-RPSG01 · resolutions implemented
-2026-07-20, pending formal Gate G3 confirmation.
+## PR 2 — collectors, RPSG01 deployment, Observatory Monitor
+
+Judgment calls made while implementing PR 2 (branch
+`a001/m003-collectors-monitor`), 2026-07-21:
+
+### 7. First sync of an in-flight mission ⇒ collector stamps `backfill: true`
+
+Implements the PR 2 note under question 5: when the agent collector observes
+a mission for the first time (per collector process) in any state other than
+`Created`, it stamps `backfill: true` on that initial `mission_update` — the
+backend only admits entry at a non-initial state as a privileged, audit-logged
+backfill transition. Subsequent observations follow the normal one-step graph
+and carry no flag (unless the agent state file sets it explicitly for an
+operator-driven recovery jump, which is passed through untouched). A collector
+*restart* therefore re-syncs current mission states as backfill self-loops —
+idempotent, legal, and audit-visible by design. Verified live: M003 entered
+the projection at `Running` with `"backfill": true` stored on the event.
+
+### 8. Monitor placement and exposure → SD-020 (Proposed)
+
+The Observatory Monitor is a server-rendered HTML page at `GET /monitor`
+*inside the backend* (stdlib rendering + `html.escape`, meta-refresh, no
+JS/build toolchain), exposed like `/health`//`/metrics`: no API key,
+network-boundary protection (loopback/tailnet only). Alternatives (separate
+stdlib service, static generator) and the exposure rationale are recorded in
+[SD-020](decisions/SD-020-server-rendered-monitor-in-backend.md).
+
+### 9. Token usage on the monitor — OPEN, placeholder shown
+
+M003 asks for “token usage where available.” The OpenClaw runtime does not
+expose token consumption in any machine-readable file the agent collector may
+read cheaply (session logs are internal, and scraping them would couple the
+collector to runtime internals). The monitor shows an explicit
+“n/a — not yet collected” placeholder; a proper source (agent state file
+field maintained by the runtime, or a future usage API) is deferred — to be
+picked up with the AI-usage collector milestone (roadmap).
+
+### 10. RPSG01 deployment specifics (real installation, supervisor-authorized)
+
+- **ClickHouse runs natively** under a systemd *user* unit
+  (`deploy/systemd/observatory-clickhouse.service`): the Pi 4 (ARMv8.0)
+  cannot run official CH docker images (backend/ARCHITECTURE.md). Loopback
+  only; `MemoryMax=2G` guards the Pi's 4 GiB RAM.
+- **ClickHouse uses the `default` user with no password** on this
+  development host: the server is loopback-bound on a single-user machine,
+  and the native binary's embedded config has no users.xml management.
+  Acceptable for the SD-001 *local* variant only; the VPS compose stack keeps
+  the passworded `observatory` user. Recorded here rather than as an SD —
+  configuration, not architecture.
+- **Secrets** live in untracked `~/.config/observatory/*.env` files
+  (chmod 600), generated with `openssl rand -hex 32`, bound per SD-017
+  (`RPSG01` → host collector, `A001` → agent collector). The repository
+  carries placeholder examples only.
+- **Agent state file** (`~/.config/observatory/agent-state.json`) is
+  maintained by the agent (A001) as part of its working practice; the
+  collector only ever reads it. Keeping it current is now part of the
+  mission workflow.
+- systemd sandboxing (`ProtectHome=read-only`, `ProtectSystem=strict`,
+  `PrivateTmp`) worked as-written for the user units on this host (systemd
+  257, unprivileged user namespaces available); no weakening was needed.
+
+---
+
+Written under Mission M003 by A001-OC01-RPSG01 · PR 1 resolutions implemented
+2026-07-20 and accepted at Gate G3 review; PR 2 sections added 2026-07-21.
