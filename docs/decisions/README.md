@@ -19,3 +19,8 @@ a new decision that supersedes it.
 | [SD-010](SD-010-relational-time-series-first.md) | Relational time-series first; Prometheus later | Approved |
 | [SD-011](SD-011-python-backend.md) | Backend language: Python | Approved |
 | [SD-012](SD-012-networking-follows-sd-003.md) | Tailscale vs. WireGuard → SD-003 | Approved |
+| [SD-013](SD-013-health-endpoint-unauthenticated.md) | `/health` requires no authentication | Approved |
+| [SD-014](SD-014-metrics-endpoint-unauthenticated.md) | `/metrics` unauthenticated, internal exposure only | Approved |
+| [SD-015](SD-015-compose-layout-phase1.md) | Keep current compose layout during Phase 1 | Approved |
+| [SD-016](SD-016-plain-sql-migrations.md) | Plain ordered SQL migrations, no framework | Approved |
+| [SD-017](SD-017-api-key-bound-to-fleet-identity.md) | API key bound to exactly one Fleet identity | Approved |
