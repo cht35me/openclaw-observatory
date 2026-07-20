@@ -1,8 +1,26 @@
 # FLEET.md — Fleet Identity Model and Registry
 
-This document defines how autonomous agents, hosts, and their relationships are
-identified across the fleet. The Observatory's Fleet Registry (see
-[docs/architecture.md](docs/architecture.md)) will implement this model.
+This document defines how autonomous agents, hosts, services, and their
+relationships are identified across the fleet. The Observatory's Fleet Registry
+(see [docs/architecture.md](docs/architecture.md)) implements this model.
+
+## Asset Types
+
+Every registry entry declares what kind of thing it identifies:
+
+| `asset_type` | Meaning | Example Fleet IDs |
+| --- | --- | --- |
+| `agent` | Autonomous agent (global A-serial) | `A001` |
+| `node` | Physical or virtual host | `RPSG01`, `VPEU01` |
+| `service` | Software deployment running on a node | `OBLN01`, `OBCN01` |
+| `device` | Operational hardware | a future Bitaxe miner |
+| `sensor` | Measurement endpoint | a future environment probe |
+
+**Software services and physical hosts are different asset types.** `RPSG01`
+is the physical Raspberry Pi node; the Observatory backend/monitor running on
+RPSG01 is a *separate* `service` asset. Every service asset must reference an
+established host node through the explicit `host_fleet_id` relationship field
+— placement is never inferred by parsing a Fleet ID.
 
 ## Identity Convention
 
@@ -51,6 +69,66 @@ Examples:
 - `RPSG01` — Raspberry Pi, Singapore, host 01
 - `VPEU01` — VPS, Europe, host 01
 - `WSSG01` — Workstation, Singapore, host 01
+
+## Service Identity Scheme
+
+Service deployments (the Observatory itself, and future service software) get
+Fleet IDs of the form:
+
+```text
+<DEPLOYMENT-TYPE><NN>
+```
+
+| Deployment-type prefix | Meaning |
+| --- | --- |
+| `OBLN` | Observatory Local Node — a local Observatory deployment (SD-001 local variant) |
+| `OBCN` | Observatory Central Node — the central Observatory deployment (SD-001 central variant) |
+| *(future)* | New service/deployment types reserve a prefix here before first use |
+
+`NN` is a two-digit serial per deployment type (extendable), assigned at
+commissioning, **immutable and never reused** — exactly like agent global
+serials.
+
+Examples:
+
+- `OBLN01` — Observatory Local Node deployment 01 (the backend/monitor
+  currently hosted on RPSG01)
+- `OBCN01` — the future central Observatory deployment on a VPS
+
+### Relationship fields, not encoded IDs
+
+A service's placement, role, and version are **explicit registry fields**,
+never encoded into (or parsed out of) the Fleet ID:
+
+| Field | Example | Meaning |
+| --- | --- | --- |
+| `host_fleet_id` | `RPSG01` | The node this service runs on. **Mandatory** for services; must reference an established `node` asset. |
+| `deployment_role` | `local` / `central` | The SD-001 variant this deployment implements (fixed at commissioning; consistent with the `OBLN`/`OBCN` prefix). |
+| `service_version` | `v1` | Deployed service generation (major version). |
+
+An ID like `OBS-LOCAL-V01-RPSG01` was considered and rejected: it encodes
+mutable properties (host, version) into an immutable key, so every re-host or
+major upgrade would force a new identity and orphan telemetry history.
+
+### Lifecycle consequences (explicit)
+
+- **Changing host** (e.g. moving OBLN01 from RPSG01 to RPSG02) **updates the
+  `host_fleet_id` attribute** — the service identity is unchanged, and the
+  change is recorded in the registry with timestamp and authorizing human,
+  like any lifecycle transition.
+- **Upgrading software** updates `service_version`/`software_version`
+  attributes — the identity is unchanged; telemetry history stays continuous
+  across upgrades.
+- **A new identity is minted only for a genuinely distinct deployment**: a
+  second local deployment becomes `OBLN02`; the central deployment is
+  `OBCN01`. A local deployment is never "promoted" to central — `OBCN01` is
+  commissioned as a new asset and `OBLN01` retires or continues per SD-001.
+- **Retirement** follows the same rules as agents: serials are never reused,
+  audit history is preserved.
+
+For documents and dashboards, a descriptive full form `OBLN01-RPSG01`
+(service + current host) may be used — like `A001-OC01-RPSG01`, it is
+cosmetic display metadata, never a key.
 
 ## What the Model Supports
 
@@ -108,6 +186,7 @@ Each registry entry contains at minimum:
 
 | Field | Description |
 | --- | --- |
+| Asset Type | `agent` / `node` / `service` / `device` / `sensor` |
 | Global ID | Immutable serial (`A001`) |
 | Agent ID | Instance + host (`OC01-RPSG01`) |
 | Full Identity | Combined identity (`A001-OC01-RPSG01`) |
@@ -126,6 +205,9 @@ Each registry entry contains at minimum:
 | Repository | Primary repository (where applicable) |
 | Credentials Reference | *Names* of provisioned credentials (never values) |
 | Notes | Free-form operational notes |
+
+Service assets additionally carry the relationship fields defined above
+(`host_fleet_id`, `deployment_role`, `service_version`).
 
 ## Fleet Registry
 
@@ -149,6 +231,24 @@ Each registry entry contains at minimum:
 
 ---
 
+### OBLN01 — Observatory Local Node 01
+
+| Field | Value |
+| --- | --- |
+| Asset Type | service |
+| Fleet ID | OBLN01 |
+| Role | Observatory Backend |
+| Host (`host_fleet_id`) | RPSG01 |
+| Deployment Role | local |
+| Service Version | v1 |
+| Status | Active |
+| Supervisor | Martin |
+| Commissioned | 2026-07-20 (Mission M003) |
+
+---
+
 This file is the interim registry of record until the Observatory's Fleet Registry
 service exists; at that point this document remains the specification and the service
-becomes the runtime source of truth. Defined under Mission M001 by A001-OC01-RPSG01.
+becomes the runtime source of truth (the M003 backend seeds its registry from the
+entries above). Defined under Mission M001, extended with asset types and service
+identity under Mission M003, by A001-OC01-RPSG01.
