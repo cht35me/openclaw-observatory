@@ -11,6 +11,9 @@ REST API (`POST /api/v1/events`, SD-004/SD-017) and are deliberately
 | Raspberry Pi host | `observatory_collectors.host_pi` | `heartbeat`, `system_metrics`, `docker_status` | M003 §2/§10 |
 | OpenClaw agent | `observatory_collectors.openclaw_agent` | `heartbeat`, `agent_status`, `mission_update` | M003 §3/§4 |
 
+Both collectors are installed and running on RPSG01 as systemd user units
+(M003 PR 2, supervisor-authorized) — see “Deployment on RPSG01” below.
+
 ## Running
 
 ```bash
@@ -68,12 +71,49 @@ Entries under `missions` are forwarded as `mission_update` events —
 deduplicated client-side, so only actual transitions reach the backend
 (which validates lifecycle order and rejects illegal moves with 409).
 
-## Deployment on RPSG01
+**Backfill rule:** the first time the collector observes a mission that is
+already mid-flight (any state other than `Created`), it stamps
+`backfill: true` on that initial `mission_update` — the backend only admits
+entry at a non-initial state as a privileged, audit-logged backfill
+transition (mission lifecycle rules, docs/M003-open-questions.md §5/§7).
+Subsequent observations follow the normal one-step graph without the flag.
+An explicit `backfill` value in the state file is passed through untouched
+(operator-driven recovery jumps).
 
-systemd **user** units are provided in [`systemd/`](systemd/) with install
-instructions in each file. Per AGENTS.md §12, *enabling* them is an
-infrastructure change requiring supervisor approval — M003 ships the unit
-files only.
+## Deployment on RPSG01 (as executed, M003 PR 2)
+
+systemd **user** units are provided in [`systemd/`](systemd/); the backend
+and ClickHouse units live in [`../deploy/systemd/`](../deploy/systemd/).
+Enabling them is an infrastructure change requiring supervisor approval
+(AGENTS.md §12) — granted for RPSG01 in M003 PR 2. The exact steps executed:
+
+```bash
+# 1. Untracked configuration (secrets never enter the repository)
+mkdir -p ~/.config/observatory ~/.config/systemd/user
+#    one key per identity (SD-017), e.g.: openssl rand -hex 32
+cp collectors/config.example.env ~/.config/observatory/host-collector.env   # edit: FLEET_ID=RPSG01 + key
+cp collectors/config.example.env ~/.config/observatory/agent-collector.env  # edit: FLEET_ID=A001 + key,
+                                                                            # AGENT_STATE_FILE, AGENT_MODEL_ID
+chmod 600 ~/.config/observatory/*.env
+# backend.env gets the matching API_KEYS bindings (see ../deploy/backend.example.env)
+
+# 2. Agent state file (maintained by the agent runtime; collector only reads)
+#    ~/.config/observatory/agent-state.json — shape documented above
+
+# 3. Units
+cp collectors/systemd/*.service deploy/systemd/*.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now observatory-clickhouse observatory-backend
+systemctl --user enable --now observatory-host-collector observatory-agent-collector
+loginctl enable-linger $USER    # keep user units running without a session
+```
+
+Validation: `curl -s http://127.0.0.1:8000/health`, then
+`GET /api/v1/fleet` (authenticated) shows RPSG01/A001 online with live
+telemetry, and `http://127.0.0.1:8000/monitor` renders the instrument panel.
+The sandboxing directives (`ProtectHome=read-only`, `ProtectSystem=strict`,
+`NoNewPrivileges`, `PrivateTmp`) run as-written under systemd 257 user
+units on Raspberry Pi OS.
 
 ## Failure behavior
 

@@ -9,8 +9,9 @@
 #   systemctl --user enable --now observatory-agent-collector
 #   loginctl enable-linger $USER
 #
-# NOTE (AGENTS.md §12): enabling this service is an infrastructure change and
-# requires supervisor approval; M003 delivers the unit file only.
+# NOTE (AGENTS.md §12): enabling this service is an infrastructure change
+# requiring supervisor approval — granted for RPSG01 in M003 PR 2, where this
+# unit was installed and validated live (see collectors/README.md).
 
 [Unit]
 Description=OpenClaw Observatory agent collector (OpenClaw self-monitoring)
