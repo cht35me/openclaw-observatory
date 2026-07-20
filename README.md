@@ -11,7 +11,7 @@ supervisor a single place to answer: **what is the fleet doing, is it healthy, a
 anything need my attention?**
 
 The M001 foundation phase (documentation, architecture, governance) is complete:
-architecture and technology decisions **SD-001…SD-012** are recorded in
+architecture and technology decisions **SD-001…SD-017** are recorded in
 [docs/decisions/](docs/decisions/README.md). Mission **M002** delivers the first
 production code: the core backend skeleton in [backend/](backend/) — an authenticated,
 versioned ingestion API backed by ClickHouse, with health, metrics, and structured
@@ -83,8 +83,19 @@ packaging.
 
 The backend lives in [backend/](backend/): a Python 3.13 / FastAPI service that
 accepts authenticated telemetry events over a versioned REST API (SD-004) and stores
-them in ClickHouse (SD-005). See [backend/OPEN_QUESTIONS.md](backend/OPEN_QUESTIONS.md)
-for implementation notes awaiting supervisor rulings.
+them in ClickHouse (SD-005). The layered design is documented in
+[backend/ARCHITECTURE.md](backend/ARCHITECTURE.md); the implementation questions
+raised during M002 were resolved at the Gate G2 review as **SD-013…SD-017**
+(see [backend/OPEN_QUESTIONS.md](backend/OPEN_QUESTIONS.md)).
+
+### Architecture note: ClickHouse per environment
+
+| Environment | ClickHouse | Why |
+| --- | --- | --- |
+| **Development (Raspberry Pi 4)** | Native ClickHouse binary | Official ClickHouse Docker images require ARMv8.2 instructions; the Pi 4 (Cortex-A72, ARMv8.0) cannot run them. |
+| **Production (VPS)** | Docker Compose | Full containerized stack on x86-64. |
+
+The backend is agnostic — only `CLICKHOUSE_HOST`/`CLICKHOUSE_PORT` differ.
 
 ### One-command startup (Docker)
 
@@ -100,16 +111,16 @@ This starts ClickHouse (internal-only; no host port) and the backend on
 
 | Endpoint | Auth | Description |
 | --- | --- | --- |
-| `GET /health` | none | Status (`ok`/`degraded`), version, uptime, DB connectivity. Always HTTP 200; a DB outage flips `status` to `degraded` (a liveness probe must not restart a healthy API process). |
-| `GET /metrics` | none | Prometheus metrics: request count/latency, ingestion successes/failures, DB latency. |
-| `POST /api/v1/events` | `X-API-Key` | Ingest one telemetry event (strictly validated JSON). Returns `202` with the assigned event UUID. |
+| `GET /health` | none ([SD-013](docs/decisions/SD-013-health-endpoint-unauthenticated.md)) | Status (`ok`/`degraded`), version, uptime, DB connectivity. Always HTTP 200; a DB outage flips `status` to `degraded` (a liveness probe must not restart a healthy API process). |
+| `GET /metrics` | none, internal-only ([SD-014](docs/decisions/SD-014-metrics-endpoint-unauthenticated.md)) | Prometheus metrics: request count/latency, ingestion successes/failures, DB latency. Protected by network boundaries (firewall/reverse proxy/tailnet), never exposed publicly. |
+| `POST /api/v1/events` | `X-API-Key` | Ingest one telemetry event (strictly validated JSON). Returns `202` with the assigned event UUID. Each key is bound to one collector identity ([SD-017](docs/decisions/SD-017-api-key-bound-to-fleet-identity.md)); submitting another `collector_id` returns `403`. |
 
 Example ingestion:
 
 ```bash
 curl -s -X POST http://127.0.0.1:8000/api/v1/events \
   -H 'Content-Type: application/json' \
-  -H 'X-API-Key: <one of API_KEYS>' \
+  -H 'X-API-Key: <key bound to collector_id "demo" in API_KEYS>' \
   -d '{"collector_id":"demo","timestamp":"2026-07-19T12:00:00Z","event_type":"synthetic","payload":{"temperature":41,"status":"ok"}}'
 ```
 
@@ -122,7 +133,7 @@ curl -s -X POST http://127.0.0.1:8000/api/v1/events \
 | `CLICKHOUSE_DATABASE` | `observatory` | Database (created on startup if missing) |
 | `CLICKHOUSE_USERNAME` | `default` | Database user (`observatory` in compose) |
 | `CLICKHOUSE_PASSWORD` | *(empty)* | Database password — secret, env-only |
-| `API_KEYS` | *(empty ⇒ reject all)* | Accepted collector keys: comma-separated or JSON array — secret, env-only |
+| `API_KEYS` | *(empty ⇒ reject all)* | Collector key↔identity bindings ([SD-017](docs/decisions/SD-017-api-key-bound-to-fleet-identity.md)): comma-separated `collector_id:key` pairs or JSON object — secret, env-only |
 | `LOG_LEVEL` | `INFO` | Structured-log level |
 | `APP_VERSION` | `0.1.0` | Version reported by `/health` and metrics |
 | `MAX_REQUEST_BYTES` | `1048576` | Request body size limit (middleware-enforced) |
@@ -154,10 +165,12 @@ reachable (e.g. via `docker compose up clickhouse`).
 ├── .env.example                # Configuration template (placeholders only)
 ├── backend/                    # Observatory backend service (M002)
 │   ├── app/                    # FastAPI application (api/, storage/, models/)
+│   ├── migrations/             # Ordered SQL schema migrations (SD-016)
 │   ├── tests/                  # Pytest suite (offline; CH integration auto-skips)
+│   ├── ARCHITECTURE.md         # One-page layered architecture overview
 │   ├── Dockerfile              # Slim, non-root container image
 │   ├── requirements*.txt       # Pinned dependencies
-│   └── OPEN_QUESTIONS.md       # M002 notes awaiting supervisor rulings
+│   └── OPEN_QUESTIONS.md       # M002 questions — resolved as SD-013…SD-017
 └── docs/
     ├── vision.md               # Mission Control vision
     ├── requirements.md         # Functional and non-functional requirements
@@ -205,7 +218,7 @@ M001. See [docs/deployment.md](docs/deployment.md).
 | [docs/vision.md](docs/vision.md) | Long-term Mission Control vision |
 | [docs/requirements.md](docs/requirements.md) | Requirements: M001, MVP, future, out of scope |
 | [docs/architecture.md](docs/architecture.md) | Architecture, decisions, and trade-offs |
-| [docs/decisions/](docs/decisions/README.md) | Supervisor decision records (SD-001…SD-012) |
+| [docs/decisions/](docs/decisions/README.md) | Supervisor decision records (SD-001…SD-017) |
 | [docs/roadmap.md](docs/roadmap.md) | Staged milestones with dependencies and gates |
 | [docs/security.md](docs/security.md) | Threat model and security strategy |
 | [docs/deployment.md](docs/deployment.md) | Deployment lifecycle and operations |
