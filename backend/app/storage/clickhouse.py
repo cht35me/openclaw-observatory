@@ -5,9 +5,11 @@ every operation runs in a worker thread via :func:`asyncio.to_thread`; an
 ``asyncio.Lock`` serializes access because a single driver client must not
 run concurrent queries over one session.
 
-Bootstrap (M002 "migrations/bootstrap") is idempotent DDL: it creates the
-database and the ``events`` table if missing. A versioned migration framework
-is deliberately deferred until a second schema change exists.
+Schema management (SD-016) uses plain, ordered SQL migration files from
+``backend/migrations/`` (``0001_init.sql``, ``0002_...``), applied in
+filename order at startup. Applied migrations are recorded in a
+``schema_migrations`` ledger table, so startup is idempotent. No migration
+framework (no Alembic/Flyway/Liquibase) — per supervisor decision.
 
 Schema notes:
 
@@ -25,6 +27,7 @@ import json
 import re
 from collections.abc import Callable
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -40,6 +43,9 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 #: Defense in depth: the database name comes from the environment; restrict it
 #: to a safe identifier before it is interpolated into DDL/DML.
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+#: Ordered SQL migration files (SD-016): backend/migrations/NNNN_name.sql.
+DEFAULT_MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "migrations"
 
 _EVENT_COLUMNS = (
     "id",
@@ -68,6 +74,7 @@ class ClickHouseEventStorage(EventStorage):
         self,
         settings: Settings,
         on_db_latency: Callable[[str, float], None] | None = None,
+        migrations_dir: Path | None = None,
     ) -> None:
         if not _IDENTIFIER_RE.match(settings.clickhouse_database):
             raise ValueError(
@@ -77,6 +84,8 @@ class ClickHouseEventStorage(EventStorage):
         self._settings = settings
         self._database = settings.clickhouse_database
         self._table = f"`{self._database}`.`events`"
+        self._migrations_table = f"`{self._database}`.`schema_migrations`"
+        self._migrations_dir = migrations_dir or DEFAULT_MIGRATIONS_DIR
         self._on_db_latency = on_db_latency or _noop_latency
         self._client: Client | None = None
         self._lock = asyncio.Lock()
@@ -123,28 +132,63 @@ class ClickHouseEventStorage(EventStorage):
     # ------------------------------------------------------------------ #
 
     async def startup(self) -> None:
-        """Connect and apply idempotent schema bootstrap."""
+        """Connect and apply pending SQL migrations in filename order (SD-016)."""
+
+        migrations = self._load_migrations()
 
         def bootstrap(client: Client) -> None:
             client.command(f"CREATE DATABASE IF NOT EXISTS `{self._database}`")
             client.command(
                 f"""
-                CREATE TABLE IF NOT EXISTS {self._table} (
-                    id UUID,
-                    collector_id LowCardinality(String),
-                    timestamp DateTime64(3, 'UTC'),
-                    event_type LowCardinality(String),
-                    payload String CODEC(ZSTD(3)),
-                    schema_version UInt32,
-                    received_at DateTime64(3, 'UTC')
+                CREATE TABLE IF NOT EXISTS {self._migrations_table} (
+                    name String,
+                    applied_at DateTime64(3, 'UTC')
                 )
                 ENGINE = MergeTree
-                PARTITION BY toYYYYMM(timestamp)
-                ORDER BY (collector_id, event_type, timestamp)
+                ORDER BY name
                 """
             )
+            applied = {
+                row[0]
+                for row in client.query(
+                    f"SELECT name FROM {self._migrations_table}"
+                ).result_rows
+            }
+            for name, statements in migrations:
+                if name in applied:
+                    continue
+                for statement in statements:
+                    client.command(statement)
+                client.insert(
+                    self._migrations_table,
+                    [[name, datetime.now(UTC)]],
+                    column_names=["name", "applied_at"],
+                )
 
         await self._run("bootstrap", bootstrap)
+
+    def _load_migrations(self) -> list[tuple[str, list[str]]]:
+        """Read ``NNNN_name.sql`` files, sorted, split into statements.
+
+        The ``{database}`` token in migration SQL is replaced with the
+        (identifier-validated) configured database name.
+        """
+        if not self._migrations_dir.is_dir():
+            raise StorageError(f"migrations directory not found: {self._migrations_dir}")
+        migrations: list[tuple[str, list[str]]] = []
+        for path in sorted(self._migrations_dir.glob("*.sql")):
+            sql = path.read_text(encoding="utf-8").replace("{database}", self._database)
+            lines = [
+                line for line in sql.splitlines() if not line.lstrip().startswith("--")
+            ]
+            statements = [
+                statement.strip()
+                for statement in "\n".join(lines).split(";")
+                if statement.strip()
+            ]
+            if statements:
+                migrations.append((path.name, statements))
+        return migrations
 
     async def shutdown(self) -> None:
         """Close the client; never raises."""
