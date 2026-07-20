@@ -70,6 +70,17 @@ design: they are unauthenticated ([SD-013](../docs/decisions/SD-013-health-endpo
 protected by network boundaries (loopback/tailnet in development; firewall,
 reverse proxy, and internal networks in production), never by API keys.
 
+`GET /monitor` (M003, [SD-020](../docs/decisions/SD-020-server-rendered-monitor-in-backend.md),
+proposed) follows the same exposure model: the Observatory Monitor is a
+server-rendered HTML instrument panel — agent health, mission progress, host
+CPU/RAM/storage, Docker status, and the full fleet table with computed health
+— built from the *same read models* the authenticated `/api/v1` routes serve.
+`app/services/monitor.py` splits an async snapshot builder (reads
+`RegistryService`/`MissionStorage`/`EventStorage`) from pure rendering
+functions (stdlib string composition, every dynamic value HTML-escaped, meta
+refresh instead of JavaScript); `app/api/monitor.py` is the thin route. It is
+strictly read-only and adds no new storage or auth surface.
+
 ## Environments (architecture note)
 
 | Environment | ClickHouse | Why |
