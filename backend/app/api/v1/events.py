@@ -37,16 +37,33 @@ async def ingest_event(
     request: Request,
     storage: StorageDep,
     metrics: MetricsDep,
-    _principal: Annotated[CollectorPrincipal, Depends(require_collector)],
+    principal: Annotated[CollectorPrincipal, Depends(require_collector)],
 ) -> EventAccepted:
     """Validate, stamp, and persist a single collector event.
 
-    Returns **202 Accepted** with the assigned event ID, or **503** if the
-    storage backend is unavailable (collectors retry with backoff per
-    docs/architecture.md §4).
+    Returns **202 Accepted** with the assigned event ID, **403** if the
+    authenticated identity does not own the submitted ``collector_id``
+    (SD-017), or **503** if the storage backend is unavailable (collectors
+    retry with backoff per docs/architecture.md §4).
     """
     # Expose the collector identity to the request-logging middleware.
     request.state.collector_id = inbound.collector_id
+
+    # SD-017: each API key is bound to exactly one Fleet identity; a collector
+    # may only submit telemetry for its own collector_id (anti-spoofing).
+    if inbound.collector_id != principal.subject:
+        metrics.events_ingestion_failures_total.labels(reason="identity_mismatch").inc()
+        _logger.warning(
+            "collector identity mismatch rejected",
+            extra={
+                "collector_id": inbound.collector_id,
+                "authenticated_subject": principal.subject,
+            },
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="API key is not authorized for this collector_id.",
+        )
 
     event = Event.from_ingest(inbound)
     try:

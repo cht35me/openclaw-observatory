@@ -12,6 +12,11 @@ future JWT authenticator (out of scope for M002) can replace
 :class:`ApiKeyAuthenticator` without touching any endpoint code — only the
 authenticator wired into ``app.state`` changes.
 
+Identity binding (SD-017): every API key is bound to exactly one Fleet
+identity, so a successful authentication yields the ``collector_id`` the key
+belongs to. Ingestion routes reject events whose ``collector_id`` does not
+match the authenticated identity — collectors cannot spoof each other.
+
 Security notes (docs/security.md):
 
 * Key comparison uses :func:`hmac.compare_digest` and evaluates *every*
@@ -38,7 +43,10 @@ _api_key_header = APIKeyHeader(
     name=API_KEY_HEADER_NAME,
     auto_error=False,
     scheme_name="CollectorApiKey",
-    description="Per-collector API key (configured via the API_KEYS environment variable).",
+    description=(
+        "Per-collector API key, bound to exactly one collector identity "
+        "(configured via the API_KEYS environment variable, SD-017)."
+    ),
 )
 
 
@@ -47,8 +55,9 @@ class CollectorPrincipal:
     """Result of a successful collector authentication.
 
     ``method`` records how the caller authenticated ("api_key" today, "jwt"
-    later). ``subject`` is a stable identifier for the authenticated party;
-    plain API keys carry no identity, so it is a fixed marker for now.
+    later). ``subject`` is the Fleet identity (``collector_id``) the
+    credential is bound to (SD-017) — the only identity this caller may
+    submit telemetry for.
     """
 
     method: str
@@ -69,22 +78,30 @@ class CollectorAuthenticator(ABC):
 
 
 class ApiKeyAuthenticator(CollectorAuthenticator):
-    """Validates a presented key against the configured key set."""
+    """Validates a presented key against configured key→identity bindings.
 
-    def __init__(self, api_keys: tuple[str, ...]) -> None:
-        self._keys = tuple(key.encode("utf-8") for key in api_keys)
+    Constructed from ``(collector_id, key)`` pairs (SD-017): each key belongs
+    to exactly one Fleet identity, and a match yields a principal whose
+    ``subject`` is that identity.
+    """
+
+    def __init__(self, bindings: tuple[tuple[str, str], ...]) -> None:
+        self._bindings = tuple(
+            (collector_id, key.encode("utf-8")) for collector_id, key in bindings
+        )
 
     def authenticate(self, credential: str | None) -> CollectorPrincipal | None:
-        if not credential or not self._keys:
+        if not credential or not self._bindings:
             return None
         candidate = credential.encode("utf-8")
         # Constant-time check of every configured key; no early exit.
-        valid = False
-        for key in self._keys:
-            valid |= hmac.compare_digest(candidate, key)
-        if not valid:
+        matched: str | None = None
+        for collector_id, key in self._bindings:
+            if hmac.compare_digest(candidate, key):
+                matched = collector_id
+        if matched is None:
             return None
-        return CollectorPrincipal(method="api_key", subject="collector")
+        return CollectorPrincipal(method="api_key", subject=matched)
 
 
 def require_collector(

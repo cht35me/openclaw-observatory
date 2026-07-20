@@ -80,7 +80,7 @@ def create_app(
     app.state.settings = settings
     app.state.storage = storage
     app.state.metrics = metrics
-    app.state.authenticator = ApiKeyAuthenticator(settings.api_key_list)
+    app.state.authenticator = ApiKeyAuthenticator(settings.api_key_bindings)
     app.state.started_at_monotonic = time.monotonic()  # refined in lifespan
 
     # Middleware: last added runs first, so ordering below yields

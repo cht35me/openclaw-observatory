@@ -17,8 +17,12 @@ from app.config import Settings
 from app.main import create_app
 from app.storage.memory import InMemoryEventStorage
 
-#: Keys configured for the test app (never real credentials).
-TEST_API_KEYS = ("test-key-alpha", "test-key-beta")
+#: Key → identity bindings for the test app (SD-017; never real credentials).
+TEST_KEY_BINDINGS: dict[str, str] = {
+    "test-key-alpha": "demo",
+    "test-key-beta": "other-collector",
+}
+TEST_API_KEYS = tuple(TEST_KEY_BINDINGS)
 
 VALID_EVENT: dict = {
     "collector_id": "demo",
@@ -33,12 +37,19 @@ def auth_headers(key: str = TEST_API_KEYS[0]) -> dict[str, str]:
     return {"X-API-Key": key}
 
 
+def event_for(collector_id: str) -> dict:
+    """A valid event payload for the given collector identity."""
+    return {**VALID_EVENT, "collector_id": collector_id}
+
+
 @pytest.fixture
 def settings() -> Settings:
     """Settings isolated from the host environment and any .env file."""
     return Settings(
         _env_file=None,
-        api_keys=",".join(TEST_API_KEYS),
+        api_keys=",".join(
+            f"{collector_id}:{key}" for key, collector_id in TEST_KEY_BINDINGS.items()
+        ),
         app_version="0.0.0-test",
         log_level="INFO",
         max_request_bytes=4096,

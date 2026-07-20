@@ -8,7 +8,7 @@ from app.auth import ApiKeyAuthenticator
 from app.config import Settings
 from app.main import create_app
 from app.storage.memory import InMemoryEventStorage
-from tests.conftest import TEST_API_KEYS, VALID_EVENT, auth_headers
+from tests.conftest import TEST_KEY_BINDINGS, VALID_EVENT, auth_headers, event_for
 
 
 def test_missing_key_rejected(client: TestClient) -> None:
@@ -35,11 +35,31 @@ def test_valid_key_accepted(client: TestClient) -> None:
 
 
 def test_every_configured_key_works(client: TestClient) -> None:
-    for key in TEST_API_KEYS:
+    """Each key authenticates — for the identity it is bound to (SD-017)."""
+    for key, collector_id in TEST_KEY_BINDINGS.items():
         response = client.post(
-            "/api/v1/events", json=VALID_EVENT, headers=auth_headers(key)
+            "/api/v1/events", json=event_for(collector_id), headers=auth_headers(key)
         )
         assert response.status_code == 202, f"key {key!r} should authenticate"
+
+
+def test_key_cannot_submit_for_other_collector(client: TestClient) -> None:
+    """SD-017: a valid key must not submit events for another collector_id."""
+    key, own_identity = next(iter(TEST_KEY_BINDINGS.items()))
+    spoofed = event_for("spoofed-collector")
+    assert spoofed["collector_id"] != own_identity
+    response = client.post("/api/v1/events", json=spoofed, headers=auth_headers(key))
+    assert response.status_code == 403
+
+
+def test_cross_collector_spoofing_rejected(client: TestClient) -> None:
+    """SD-017: key A claiming collector B's identity is forbidden."""
+    (key_a, collector_a), (_key_b, collector_b) = list(TEST_KEY_BINDINGS.items())
+    assert collector_a != collector_b
+    response = client.post(
+        "/api/v1/events", json=event_for(collector_b), headers=auth_headers(key_a)
+    )
+    assert response.status_code == 403
 
 
 def test_no_configured_keys_rejects_everything() -> None:
@@ -54,11 +74,12 @@ def test_no_configured_keys_rejects_everything() -> None:
 
 
 def test_authenticator_unit() -> None:
-    authenticator = ApiKeyAuthenticator(("alpha", "beta"))
-    assert authenticator.authenticate("alpha") is not None
-    assert authenticator.authenticate("beta") is not None
-    principal = authenticator.authenticate("alpha")
-    assert principal is not None and principal.method == "api_key"
+    authenticator = ApiKeyAuthenticator((("col-a", "alpha"), ("col-b", "beta")))
+    principal_a = authenticator.authenticate("alpha")
+    assert principal_a is not None and principal_a.method == "api_key"
+    assert principal_a.subject == "col-a"  # SD-017: key resolves to its identity
+    principal_b = authenticator.authenticate("beta")
+    assert principal_b is not None and principal_b.subject == "col-b"
     assert authenticator.authenticate("alph") is None
     assert authenticator.authenticate("alphaa") is None
     assert authenticator.authenticate("") is None
