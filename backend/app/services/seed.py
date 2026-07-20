@@ -7,14 +7,22 @@ and never overwrites an existing record, so operational lifecycle changes
 survive restarts. Fleet IDs are immutable; collectors have no code path that
 creates or modifies registry entries.
 
-Identity notes:
+Identity notes (FLEET.md identity model):
 
-* ``A001`` — global agent serial per FLEET.md (the full placement identity
-  ``A001-OC01-RPSG01`` is descriptive metadata, not the key).
-* ``RPSG01`` — host ID per the FLEET.md host scheme.
-* ``OBS01`` — the Observatory backend service itself. FLEET.md defines agent
-  and host IDs only; ``OBS`` is used as a service prefix pending supervisor
-  confirmation (see docs/M003-open-questions.md).
+* ``A001`` — global agent serial (``asset_type=agent``); the full placement
+  identity ``A001-OC01-RPSG01`` is descriptive metadata, not the key. Its
+  host relationship is explicit: ``host_fleet_id=RPSG01``.
+* ``RPSG01`` — the physical Raspberry Pi host (``asset_type=node``) per the
+  FLEET.md host scheme.
+* ``OBLN01`` — the Observatory backend running on RPSG01: a *separate
+  service asset* (``asset_type=service``), not a property of the node.
+  ``OBLN`` = Observatory Local Node deployment (``OBCN`` = the future central
+  deployment). Placement/version are mutable registry attributes
+  (``host_fleet_id``, ``deployment_role``, ``service_version``), never
+  encoded into the immutable Fleet ID.
+
+Seed integrity: every seeded service must reference a host node that exists
+(earlier in the seed tuple or already registered) — enforced at seed time.
 """
 
 from __future__ import annotations
@@ -23,7 +31,7 @@ import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
 
-from app.models.registry import FleetAsset, LifecycleStatus
+from app.models.registry import AssetType, DeploymentRole, FleetAsset, LifecycleStatus
 from app.storage.base import RegistryStorage
 
 _logger = logging.getLogger("observatory.registry")
@@ -32,20 +40,8 @@ _logger = logging.getLogger("observatory.registry")
 #: values arrive through the event stream at runtime).
 SEED_ASSETS: tuple[dict, ...] = (
     {
-        "fleet_id": "A001",
-        "nickname": None,  # no human-assigned nickname yet (FLEET.md: optional)
-        "hostname": "raspberrypi-sg01",
-        "role": "Autonomous Software Engineering Agent",
-        "location": "Singapore",
-        "platform": "OpenClaw",
-        "os": "Linux",
-        "software_version": None,
-        "capabilities": ("telemetry", "heartbeat", "missions"),
-        "tags": ("production", "singapore", "agent"),
-        "status": LifecycleStatus.ACTIVE,
-    },
-    {
-        "fleet_id": "RPSG01",
+        "fleet_id": "RPSG01",  # nodes first: services below reference them
+        "asset_type": AssetType.NODE,
         "nickname": None,
         "hostname": "raspberrypi-sg01",
         "role": "Fleet host",
@@ -58,14 +54,33 @@ SEED_ASSETS: tuple[dict, ...] = (
         "status": LifecycleStatus.ACTIVE,
     },
     {
-        "fleet_id": "OBS01",
+        "fleet_id": "A001",
+        "asset_type": AssetType.AGENT,
+        "nickname": None,  # no human-assigned nickname yet (FLEET.md: optional)
+        "hostname": "raspberrypi-sg01",
+        "role": "Autonomous Software Engineering Agent",
+        "location": "Singapore",
+        "platform": "OpenClaw",
+        "os": "Linux",
+        "software_version": None,
+        "host_fleet_id": "RPSG01",
+        "capabilities": ("telemetry", "heartbeat", "missions"),
+        "tags": ("production", "singapore", "agent"),
+        "status": LifecycleStatus.ACTIVE,
+    },
+    {
+        "fleet_id": "OBLN01",  # Observatory Local Node deployment 01 (FLEET.md)
+        "asset_type": AssetType.SERVICE,
         "nickname": None,
-        "hostname": "raspberrypi-sg01",  # development placement; VPS later (SD-001)
+        "hostname": "raspberrypi-sg01",  # development placement; central OBCN on VPS later (SD-001)
         "role": "Observatory Backend",
         "location": "Singapore",
         "platform": "FastAPI / Python",
         "os": "Linux",
         "software_version": None,
+        "host_fleet_id": "RPSG01",
+        "deployment_role": DeploymentRole.LOCAL,
+        "service_version": "v1",
         "capabilities": ("ingestion", "registry", "missions", "heartbeat", "metrics"),
         "tags": ("production", "singapore", "critical"),
         "status": LifecycleStatus.ACTIVE,
@@ -88,6 +103,12 @@ async def seed_registry(
             continue
         now = now_fn()
         asset = FleetAsset(registered_at=now, updated_at=now, **entry)
+        host_id = asset.host_fleet_id
+        if host_id is not None and await registry.get_asset(host_id) is None:
+            raise ValueError(
+                f"seed entry {fleet_id} references unknown host node {host_id}; "
+                "host nodes must be established before dependent assets (FLEET.md)"
+            )
         await registry.upsert_asset(asset)
         created += 1
         _logger.info("registry seeded", extra={"collector_id": fleet_id})

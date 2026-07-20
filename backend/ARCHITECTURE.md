@@ -39,16 +39,27 @@ Per M003 supervisor guidance the three concerns stay separate:
 - **Identity** — the Fleet Registry (`fleet_registry` table) is the canonical
   source of identity. It is written only by startup seeding/administration;
   collectors can never create or modify identities (immutable Fleet IDs).
+  Entries carry an `asset_type` (`agent`/`node`/`service`/`device`/`sensor`,
+  FLEET.md): the physical host `RPSG01` is a *node*, while the Observatory
+  backend running on it is a separate *service* asset `OBLN01` (Observatory
+  Local Node deployment 01) that references its host through the explicit
+  `host_fleet_id` relationship — placement, `deployment_role`, and
+  `service_version` are registry fields, never parsed out of the Fleet ID.
+  The backend emits its own heartbeat as `OBLN01`, so the Observatory is
+  offline-detectable in its own registry (self-monitoring).
 - **Telemetry** — heartbeats, system metrics, Docker status, and mission
   transitions are ordinary events in the append-only event stream; any future
   collector reuses the same envelope without model changes.
 - **Missions** — `mission_update` events are the durable transition record;
   the `missions` table is a validated current-state projection (forward-only
-  lifecycle, computed duration).
+  lifecycle — exact transition graph in `app/models/mission.py` — with
+  computed duration). Collectors report *observed* mission state only; the
+  projection is never a canonical mission record (the supervisor's mission
+  documents are).
 
 Read APIs (`GET /api/v1/fleet*`, `GET /api/v1/missions*`) are read-only joins
 of identity with derived telemetry (connectivity, health score, last
-heartbeat). Open M003 judgment calls are listed in
+heartbeat). M003 judgment calls and their resolutions are listed in
 [docs/M003-open-questions.md](../docs/M003-open-questions.md).
 
 ## Operational endpoints

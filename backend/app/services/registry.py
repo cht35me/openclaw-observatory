@@ -114,6 +114,7 @@ class RegistryService:
 
         return FleetAssetView(
             fleet_id=asset.fleet_id,
+            asset_type=asset.asset_type,
             nickname=asset.nickname,
             hostname=asset.hostname,
             role=asset.role,
@@ -124,6 +125,9 @@ class RegistryService:
                 (heartbeat.software_version if heartbeat else None)
                 or asset.software_version
             ),
+            host_fleet_id=asset.host_fleet_id,
+            deployment_role=asset.deployment_role,
+            service_version=asset.service_version,
             capabilities=asset.capabilities,
             tags=asset.tags,
             status=asset.status,

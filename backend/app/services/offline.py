@@ -22,8 +22,9 @@ State semantics:
 * judgments use **source timestamps**, so replayed old heartbeats cannot fake
   liveness (see :mod:`app.services.pipeline`).
 
-The module also emits the backend's own heartbeat (``OBS01``) so the
-Observatory is visible — and offline-detectable — in its own registry.
+The module also emits the backend's own heartbeat (``OBLN01`` — the local
+Observatory deployment's service identity, FLEET.md) so the Observatory is
+visible — and offline-detectable — in its own registry.
 """
 
 from __future__ import annotations
@@ -160,7 +161,7 @@ class OfflineDetector:
 
 
 class BackendHeartbeat:
-    """Emits the Observatory backend's own heartbeat (M003 §1: OBS01)."""
+    """Emits the Observatory backend's own heartbeat (M003 §1: OBLN01)."""
 
     def __init__(
         self,

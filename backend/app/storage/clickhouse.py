@@ -46,7 +46,7 @@ import clickhouse_connect
 from app.config import Settings
 from app.models.event import Event
 from app.models.mission import MissionRecord
-from app.models.registry import FleetAsset, LifecycleStatus
+from app.models.registry import AssetType, DeploymentRole, FleetAsset, LifecycleStatus
 from app.storage.base import EventStorage, MissionStorage, RegistryStorage, StorageError
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -71,6 +71,7 @@ _EVENT_COLUMNS = (
 
 _REGISTRY_COLUMNS = (
     "fleet_id",
+    "asset_type",
     "nickname",
     "hostname",
     "role",
@@ -78,6 +79,9 @@ _REGISTRY_COLUMNS = (
     "platform",
     "os",
     "software_version",
+    "host_fleet_id",
+    "deployment_role",
+    "service_version",
     "capabilities",
     "tags",
     "status",
@@ -370,6 +374,7 @@ class ClickHouseRegistryStorage(_ClickHouseConnection, RegistryStorage):
     async def upsert_asset(self, asset: FleetAsset) -> None:
         row = [
             asset.fleet_id,
+            asset.asset_type.value,
             asset.nickname or "",
             asset.hostname,
             asset.role,
@@ -377,6 +382,9 @@ class ClickHouseRegistryStorage(_ClickHouseConnection, RegistryStorage):
             asset.platform,
             asset.os,
             asset.software_version or "",
+            asset.host_fleet_id or "",
+            asset.deployment_role.value if asset.deployment_role else "",
+            asset.service_version or "",
             list(asset.capabilities),
             list(asset.tags),
             asset.status.value,
@@ -415,6 +423,7 @@ class ClickHouseRegistryStorage(_ClickHouseConnection, RegistryStorage):
     def _row_to_asset(row: tuple[Any, ...]) -> FleetAsset:
         (
             fleet_id,
+            asset_type,
             nickname,
             hostname,
             role,
@@ -422,6 +431,9 @@ class ClickHouseRegistryStorage(_ClickHouseConnection, RegistryStorage):
             platform,
             os_name,
             software_version,
+            host_fleet_id,
+            deployment_role,
+            service_version,
             capabilities,
             tags,
             status,
@@ -431,6 +443,7 @@ class ClickHouseRegistryStorage(_ClickHouseConnection, RegistryStorage):
         ) = row
         return FleetAsset(
             fleet_id=fleet_id,
+            asset_type=AssetType(asset_type),
             nickname=nickname or None,
             hostname=hostname,
             role=role,
@@ -438,6 +451,9 @@ class ClickHouseRegistryStorage(_ClickHouseConnection, RegistryStorage):
             platform=platform,
             os=os_name,
             software_version=software_version or None,
+            host_fleet_id=host_fleet_id or None,
+            deployment_role=DeploymentRole(deployment_role) if deployment_role else None,
+            service_version=service_version or None,
             capabilities=tuple(capabilities),
             tags=tuple(tags),
             status=LifecycleStatus(status),

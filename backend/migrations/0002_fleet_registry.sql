@@ -11,11 +11,18 @@
 -- keeping identity and telemetry cleanly separated (M003 supervisor
 -- guidance).
 --
--- Optional text fields (nickname, software_version) use the empty string as
--- the "not set" sentinel; the application maps '' <-> None.
+-- Optional text fields (nickname, software_version, host_fleet_id,
+-- deployment_role, service_version) use the empty string as the "not set"
+-- sentinel; the application maps '' <-> None.
+--
+-- Identity model (FLEET.md): `asset_type` distinguishes physical nodes,
+-- software services, agents, devices, and sensors. Services reference their
+-- host node through the explicit `host_fleet_id` relationship instead of
+-- encoding placement into the immutable Fleet ID.
 
 CREATE TABLE IF NOT EXISTS `{database}`.`fleet_registry` (
     fleet_id LowCardinality(String),
+    asset_type LowCardinality(String),
     nickname String DEFAULT '',
     hostname String,
     role String,
@@ -23,6 +30,9 @@ CREATE TABLE IF NOT EXISTS `{database}`.`fleet_registry` (
     platform String,
     os String,
     software_version String DEFAULT '',
+    host_fleet_id String DEFAULT '',
+    deployment_role LowCardinality(String) DEFAULT '',
+    service_version String DEFAULT '',
     capabilities Array(String),
     tags Array(String),
     status LowCardinality(String),

@@ -93,7 +93,7 @@ def client(
     """HTTP client against a fully wired app (lifespan running).
 
     The app seeds the Fleet Registry from :mod:`app.services.seed` during
-    startup, so the registry contains A001/RPSG01/OBS01 in every test.
+    startup, so the registry contains A001/RPSG01/OBLN01 in every test.
     """
     app = create_app(
         settings=settings,

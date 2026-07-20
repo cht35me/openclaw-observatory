@@ -21,7 +21,12 @@ import pytest
 from app.config import Settings
 from app.models.event import Event
 from app.models.mission import MissionRecord
-from app.models.registry import FleetAsset, LifecycleStatus
+from app.models.registry import (
+    AssetType,
+    DeploymentRole,
+    FleetAsset,
+    LifecycleStatus,
+)
 from app.storage.clickhouse import (
     ClickHouseEventStorage,
     ClickHouseMissionStorage,
@@ -111,6 +116,7 @@ def test_registry_versioned_upsert_roundtrip() -> None:
         fleet_id = f"ITEST{uuid4().hex[:8].upper()}"
         asset = FleetAsset(
             fleet_id=fleet_id,
+            asset_type=AssetType.SERVICE,
             nickname=None,
             hostname="integration-host",
             role="Integration Test Asset",
@@ -118,6 +124,9 @@ def test_registry_versioned_upsert_roundtrip() -> None:
             platform="pytest",
             os="Linux",
             software_version=None,
+            host_fleet_id="RPSG01",
+            deployment_role=DeploymentRole.LOCAL,
+            service_version="v1",
             capabilities=("telemetry", "heartbeat"),
             tags=("lab",),
             status=LifecycleStatus.ACTIVE,
@@ -128,6 +137,10 @@ def test_registry_versioned_upsert_roundtrip() -> None:
         stored = await registry.get_asset(fleet_id)
         assert stored is not None
         assert stored.nickname is None
+        assert stored.asset_type is AssetType.SERVICE
+        assert stored.host_fleet_id == "RPSG01"
+        assert stored.deployment_role is DeploymentRole.LOCAL
+        assert stored.service_version == "v1"
         assert stored.capabilities == ("telemetry", "heartbeat")
         assert stored.tags == ("lab",)
 

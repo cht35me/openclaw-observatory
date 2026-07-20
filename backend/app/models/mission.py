@@ -4,10 +4,31 @@ Mission lifecycle (linear, forward-only):
 
     Created → Queued → Assigned → Running → Review → Completed
 
-Transitions arrive as ``mission_update`` telemetry events through the normal
-authenticated ingestion path (the event itself is the durable transition
-record); the backend validates each transition and maintains a current-state
-projection (:class:`MissionRecord`).
+**Permitted transition graph** (exact): with the states indexed
+``Created=0 … Completed=5``, a reported transition ``current → new`` is
+legal iff ``index(new) >= index(current)``. Spelled out:
+
+* ``Created``  → Created | Queued | Assigned | Running | Review | Completed
+* ``Queued``   → Queued | Assigned | Running | Review | Completed
+* ``Assigned`` → Assigned | Running | Review | Completed
+* ``Running``  → Running | Review | Completed
+* ``Review``   → Review | Completed
+* ``Completed``→ Completed (terminal; repeats refresh metadata only)
+
+Self-loops are idempotent metadata refreshes (``pr_ref``/``commit_sha``);
+skipping forward is allowed (coarse reporters); regression is rejected with
+409 — review findings are represented by staying in ``Review`` until the
+rework lands, not by moving backwards. A mission unknown to the backend may
+enter at *any* state (backfill for missions predating tracking).
+
+**Observed state, not canonical records:** transitions arrive as
+``mission_update`` telemetry events through the normal authenticated
+ingestion path. Collectors *report observed mission state*; they cannot
+authoritatively create or mutate canonical mission records — the canonical
+mission definition lives with the supervisor's mission documents, and the
+backend's :class:`MissionRecord` store is a *validated projection* of the
+observed event stream (which remains the durable, auditable transition
+record).
 """
 
 from __future__ import annotations

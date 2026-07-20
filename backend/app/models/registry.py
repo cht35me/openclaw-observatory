@@ -20,9 +20,9 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-#: Fleet IDs follow FLEET.md conventions (e.g. ``A001``, ``RPSG01``, ``OBS01``).
+#: Fleet IDs follow FLEET.md conventions (e.g. ``A001``, ``RPSG01``, ``OBLN01``).
 FleetId = Annotated[
     str,
     Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$"),
@@ -37,6 +37,29 @@ Token = Annotated[
     str,
     Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$"),
 ]
+
+
+class AssetType(StrEnum):
+    """What kind of thing a registry entry identifies (FLEET.md taxonomy).
+
+    Physical hosts and the software running on them are *different assets*:
+    ``RPSG01`` is a ``node`` (the physical Raspberry Pi); the Observatory
+    deployment running on it (``OBLN01``) is a ``service`` that references
+    its host through :attr:`FleetAsset.host_fleet_id`.
+    """
+
+    AGENT = "agent"  # autonomous agent (A-serials, e.g. A001)
+    NODE = "node"  # physical/virtual host (e.g. RPSG01, VPEU01)
+    SERVICE = "service"  # software deployment (e.g. OBLN01, OBCN01)
+    DEVICE = "device"  # operational hardware (e.g. a Bitaxe miner)
+    SENSOR = "sensor"  # measurement endpoint (e.g. environment probe)
+
+
+class DeploymentRole(StrEnum):
+    """Role of a service deployment in the SD-001 two-variant architecture."""
+
+    LOCAL = "local"  # local Observatory deployment (OBLN — Observatory Local Node)
+    CENTRAL = "central"  # central Observatory deployment (OBCN — Observatory Central Node)
 
 
 class LifecycleStatus(StrEnum):
@@ -78,6 +101,7 @@ class FleetAsset(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     fleet_id: FleetId
+    asset_type: AssetType
     nickname: ShortText | None = Field(
         default=None,
         description="Optional human-friendly name; cosmetic, never a key (FLEET.md).",
@@ -94,6 +118,26 @@ class FleetAsset(BaseModel):
             "derived from heartbeats when available."
         ),
     )
+    host_fleet_id: FleetId | None = Field(
+        default=None,
+        description=(
+            "Fleet ID of the node this asset runs on (explicit relationship, "
+            "never parsed out of the Fleet ID). Mandatory for services; "
+            "recommended for agents."
+        ),
+    )
+    deployment_role: DeploymentRole | None = Field(
+        default=None,
+        description="local/central Observatory role; service assets only (SD-001).",
+    )
+    service_version: ShortText | None = Field(
+        default=None,
+        description=(
+            "Deployed service generation (major version, e.g. 'v1'); service "
+            "assets only. Mutable attribute — upgrades update it in place "
+            "and never mint a new Fleet ID (FLEET.md service identity)."
+        ),
+    )
     capabilities: tuple[Token, ...] = Field(
         default=(),
         description="Advertised capabilities, e.g. telemetry, heartbeat, missions, docker.",
@@ -105,6 +149,23 @@ class FleetAsset(BaseModel):
     status: LifecycleStatus = LifecycleStatus.ACTIVE
     registered_at: datetime
     updated_at: datetime
+
+    @model_validator(mode="after")
+    def _service_relationships(self) -> FleetAsset:
+        """Service assets must be anchored to an established host node.
+
+        A software deployment is not a place: every ``service`` entry must
+        reference the node it runs on and declare its SD-001 role. Non-service
+        assets must not carry a deployment role.
+        """
+        if self.asset_type is AssetType.SERVICE:
+            if self.host_fleet_id is None:
+                raise ValueError("service assets require host_fleet_id (FLEET.md)")
+            if self.deployment_role is None:
+                raise ValueError("service assets require deployment_role (SD-001)")
+        elif self.deployment_role is not None:
+            raise ValueError("deployment_role applies to service assets only")
+        return self
 
 
 class HeartbeatInfo(BaseModel):
@@ -126,6 +187,7 @@ class FleetAssetView(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     fleet_id: str
+    asset_type: AssetType
     nickname: str | None
     hostname: str
     role: str
@@ -133,6 +195,9 @@ class FleetAssetView(BaseModel):
     platform: str
     os: str
     software_version: str | None
+    host_fleet_id: str | None
+    deployment_role: DeploymentRole | None
+    service_version: str | None
     capabilities: tuple[str, ...]
     tags: tuple[str, ...]
     status: LifecycleStatus

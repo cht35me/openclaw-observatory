@@ -5,8 +5,11 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 
+import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
+from app.models.registry import AssetType, DeploymentRole, FleetAsset
 from app.services.seed import SEED_ASSETS, seed_registry
 from app.storage.memory import InMemoryRegistryStorage
 from tests.conftest import auth_headers
@@ -15,8 +18,83 @@ SEED_IDS = {entry["fleet_id"] for entry in SEED_ASSETS}
 
 
 def test_seed_contains_required_assets() -> None:
-    """FLEET.md-derived seed must include A001, RPSG01 and the backend."""
-    assert {"A001", "RPSG01", "OBS01"} <= SEED_IDS
+    """FLEET.md-derived seed must include A001, RPSG01 and the backend (OBLN01)."""
+    assert {"A001", "RPSG01", "OBLN01"} <= SEED_IDS
+
+
+def test_seed_identity_model() -> None:
+    """Physical node, agent, and service are distinct asset types (FLEET.md).
+
+    The Observatory backend on RPSG01 is a *service* asset referencing its
+    host node explicitly — host/role/version are relationship fields, never
+    parsed out of the Fleet ID.
+    """
+    by_id = {entry["fleet_id"]: entry for entry in SEED_ASSETS}
+    assert by_id["RPSG01"]["asset_type"] is AssetType.NODE
+    assert by_id["A001"]["asset_type"] is AssetType.AGENT
+    assert by_id["A001"]["host_fleet_id"] == "RPSG01"
+    obln = by_id["OBLN01"]
+    assert obln["asset_type"] is AssetType.SERVICE
+    assert obln["host_fleet_id"] == "RPSG01"
+    assert obln["deployment_role"] is DeploymentRole.LOCAL
+    assert obln["service_version"] == "v1"
+
+
+def _asset(**overrides) -> FleetAsset:
+    now = datetime(2026, 7, 20, 12, 0, tzinfo=UTC)
+    base = {
+        "fleet_id": "OBLN99",
+        "asset_type": AssetType.SERVICE,
+        "hostname": "host",
+        "role": "role",
+        "location": "loc",
+        "platform": "plat",
+        "os": "Linux",
+        "host_fleet_id": "RPSG01",
+        "deployment_role": DeploymentRole.LOCAL,
+        "registered_at": now,
+        "updated_at": now,
+    }
+    base.update(overrides)
+    return FleetAsset(**base)
+
+
+def test_service_assets_require_host_and_role() -> None:
+    """A service is not a place: it must reference an established host node."""
+    with pytest.raises(ValidationError):
+        _asset(host_fleet_id=None)
+    with pytest.raises(ValidationError):
+        _asset(deployment_role=None)
+    # Non-services must not carry a deployment role.
+    with pytest.raises(ValidationError):
+        _asset(
+            fleet_id="RPSG99",
+            asset_type=AssetType.NODE,
+            host_fleet_id=None,
+            deployment_role=DeploymentRole.LOCAL,
+        )
+
+
+def test_seeding_rejects_dangling_host_reference() -> None:
+    """Seed integrity: dependent assets need their host node registered first."""
+
+    async def scenario() -> None:
+        registry = InMemoryRegistryStorage()
+        broken = ({**SEED_ASSETS[2], "host_fleet_id": "VPEU99"},)
+        with pytest.raises(ValueError, match="unknown host node"):
+            await _seed_entries(registry, broken)
+
+    async def _seed_entries(registry, entries) -> None:
+        import app.services.seed as seed_module
+
+        original = seed_module.SEED_ASSETS
+        seed_module.SEED_ASSETS = entries
+        try:
+            await seed_registry(registry)
+        finally:
+            seed_module.SEED_ASSETS = original
+
+    asyncio.run(scenario())
 
 
 def test_seeding_is_create_only() -> None:
@@ -56,8 +134,17 @@ def test_fleet_list_returns_seeded_assets(client: TestClient) -> None:
     by_id = {asset["fleet_id"]: asset for asset in body}
     a001 = by_id["A001"]
     assert a001["role"] == "Autonomous Software Engineering Agent"
+    assert a001["asset_type"] == "agent"
+    assert a001["host_fleet_id"] == "RPSG01"
     assert "missions" in a001["capabilities"]
     assert "singapore" in a001["tags"]
+
+    obln = by_id["OBLN01"]
+    assert obln["asset_type"] == "service"
+    assert obln["host_fleet_id"] == "RPSG01"
+    assert obln["deployment_role"] == "local"
+    assert obln["service_version"] == "v1"
+    assert by_id["RPSG01"]["asset_type"] == "node"
     assert a001["status"] == "Active"
     # No heartbeat has ever been received in a fresh test app.
     assert a001["connectivity"] == "unknown"

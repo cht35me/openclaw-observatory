@@ -56,9 +56,11 @@ class Settings(BaseSettings):
     max_request_bytes: int = Field(default=1_048_576, gt=0)
 
     # --- Fleet / self-identity (M003) ---
-    # The backend itself is a Fleet Registry asset; it stamps its own
-    # heartbeat so the Observatory is visible in its own registry.
-    fleet_id: str = "OBS01"
+    # The backend itself is a Fleet Registry *service* asset (FLEET.md:
+    # OBLN01 = Observatory Local Node deployment 01, hosted on RPSG01); it
+    # stamps its own heartbeat so the Observatory is visible in its own
+    # registry.
+    fleet_id: str = "OBLN01"
     collector_name: str = "observatory-backend"
 
     # --- Heartbeats and offline detection (M003 §5/§6) ---

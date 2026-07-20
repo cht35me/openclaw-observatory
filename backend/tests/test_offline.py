@@ -73,7 +73,7 @@ def test_stopping_collector_generates_offline_event() -> None:
         assert offline[0].collector_id == "RPSG01"
         assert offline[0].payload["previous"] == "online"
         assert offline[0].payload["current"] == "offline"
-        assert offline[0].payload["detected_by"] == "OBS01"
+        assert offline[0].payload["detected_by"] == "OBLN01"
 
         # Sweep again: still offline, but no duplicate event.
         clock["now"] = NOW + timedelta(seconds=180)
@@ -145,7 +145,7 @@ def test_gauges_reflect_mixed_connectivity() -> None:
     async def scenario() -> None:
         detector, events, registry, metrics, clock = _detector(NOW)
         await seed_registry(registry, now_fn=lambda: NOW)
-        # RPSG01 fresh, A001 stale, OBS01 never seen.
+        # RPSG01 fresh, A001 stale, OBLN01 never seen.
         await events.insert_event(_heartbeat_event("RPSG01", NOW))
         await events.insert_event(
             _heartbeat_event("A001", NOW - timedelta(seconds=600))
@@ -168,7 +168,7 @@ def test_gauges_reflect_mixed_connectivity() -> None:
 
 
 def test_backend_self_heartbeat() -> None:
-    """OBS01 stamps its own heartbeat so the Observatory monitors itself."""
+    """OBLN01 stamps its own heartbeat so the Observatory monitors itself."""
 
     async def scenario() -> None:
         settings = _settings()
@@ -177,11 +177,11 @@ def test_backend_self_heartbeat() -> None:
             settings, events, uptime_fn=lambda: 42.0, now_fn=lambda: NOW
         )
         event = await beat.beat_once()
-        assert event.collector_id == "OBS01"
+        assert event.collector_id == "OBLN01"
         assert event.event_type == "heartbeat"
         assert event.payload["collector_type"] == "observatory-backend"
         assert event.payload["uptime_seconds"] == 42.0
-        stored = await events.query_events(collector_id="OBS01", limit=10)
+        stored = await events.query_events(collector_id="OBLN01", limit=10)
         assert len(stored) == 1
 
     asyncio.run(scenario())
