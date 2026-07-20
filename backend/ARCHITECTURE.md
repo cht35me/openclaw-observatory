@@ -13,7 +13,9 @@ without touching the others.
           ↓
      Event Model
           ↓
-  Storage Interface
+  Domain Services  ←— background loops (offline detector, self-heartbeat)
+          ↓
+  Storage Interfaces
           ↓
       ClickHouse
 ```
@@ -26,8 +28,28 @@ without touching the others.
 | **Authentication** | `app/auth.py` | `X-API-Key` verification (constant-time). Each key is bound to exactly one Fleet identity ([SD-017](../docs/decisions/SD-017-api-key-bound-to-fleet-identity.md)); a request may only submit events for the `collector_id` its key resolves to. The `CollectorAuthenticator` strategy interface is the extension point for a future JWT scheme. |
 | **Validation** | `app/models/event.py` (`EventIn`) | Strict Pydantic validation of inbound payloads: types, timestamp formats, field constraints. Invalid input is rejected with `422` and counted in metrics. |
 | **Event Model** | `app/models/event.py` (`Event`) | The canonical event: UUID, `collector_id`, `timestamp`, `event_type`, `payload`, `schema_version`, `received_at`. Every stored event has this shape regardless of source. |
-| **Storage Interface** | `app/storage/base.py` (`EventStorage`) | Async abstraction (`startup/shutdown/ping/insert/query`). Routes depend only on this interface — backends are swappable (`InMemoryEventStorage` for tests/dev, ClickHouse for real). |
-| **ClickHouse** | `app/storage/clickhouse.py`, `migrations/` | MergeTree-backed persistence ([SD-005](../docs/decisions/SD-005-clickhouse-central-sqlite-local.md)). Schema evolves through plain, ordered SQL files in [`migrations/`](migrations/), applied in filename order at startup ([SD-016](../docs/decisions/SD-016-plain-sql-migrations.md)) — no migration framework. |
+| **Domain Services** (M003) | `app/services/` | Server-side semantics on top of the generic event pipeline. `pipeline.py`: per-event-type handlers (heartbeat validation, mission lifecycle transitions) — validation runs before persistence, projections after. `registry.py` + `seed.py`: Fleet Registry read-model (identity ⊕ derived telemetry) and create-only seeding from FLEET.md. `health.py`: computed health score (Healthy/Warning/Critical/Offline). `offline.py`: background offline detector (OFFLINE/ONLINE transition events) and the backend's own heartbeat. |
+| **Storage Interfaces** | `app/storage/base.py` (`EventStorage`, `RegistryStorage`, `MissionStorage`) | Async abstractions. Routes and services depend only on these interfaces — backends are swappable (in-memory for tests/dev, ClickHouse for real). |
+| **ClickHouse** | `app/storage/clickhouse.py`, `migrations/` | MergeTree-backed persistence ([SD-005](../docs/decisions/SD-005-clickhouse-central-sqlite-local.md)); mutable registry/mission state uses versioned rows on `ReplacingMergeTree` ([SD-018](../docs/decisions/SD-018-clickhouse-versioned-row-state.md), proposed). Schema evolves through plain, ordered SQL files in [`migrations/`](migrations/), applied in filename order at startup ([SD-016](../docs/decisions/SD-016-plain-sql-migrations.md)) — no migration framework. |
+
+## Identity vs. telemetry vs. missions (M003)
+
+Per M003 supervisor guidance the three concerns stay separate:
+
+- **Identity** — the Fleet Registry (`fleet_registry` table) is the canonical
+  source of identity. It is written only by startup seeding/administration;
+  collectors can never create or modify identities (immutable Fleet IDs).
+- **Telemetry** — heartbeats, system metrics, Docker status, and mission
+  transitions are ordinary events in the append-only event stream; any future
+  collector reuses the same envelope without model changes.
+- **Missions** — `mission_update` events are the durable transition record;
+  the `missions` table is a validated current-state projection (forward-only
+  lifecycle, computed duration).
+
+Read APIs (`GET /api/v1/fleet*`, `GET /api/v1/missions*`) are read-only joins
+of identity with derived telemetry (connectivity, health score, last
+heartbeat). Open M003 judgment calls are listed in
+[docs/M003-open-questions.md](../docs/M003-open-questions.md).
 
 ## Operational endpoints
 
@@ -50,5 +72,5 @@ differs.
 
 ---
 
-Written under Mission M002 by A001-OC01-RPSG01 · decisions:
+Written under Missions M002/M003 by A001-OC01-RPSG01 · decisions:
 [docs/decisions/](../docs/decisions/README.md)
