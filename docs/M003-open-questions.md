@@ -1,91 +1,132 @@
-# M003 Open Questions — for Gate G3 review
+# M003 Open Questions — Gate G3 review
 
-Judgment calls made while implementing Mission M003 that need a supervisor
-ruling, following the M002 pattern
-([backend/OPEN_QUESTIONS.md](../backend/OPEN_QUESTIONS.md)). Where a call is
-architectural, it is additionally recorded as a **Proposed** decision in
-[docs/decisions/](decisions/README.md) per the M003 supervisor guidance.
+Judgment calls made while implementing Mission M003, following the M002
+pattern ([backend/OPEN_QUESTIONS.md](../backend/OPEN_QUESTIONS.md)). Where a
+call is architectural, it is additionally recorded as a **Proposed** decision
+in [docs/decisions/](decisions/README.md) per the M003 supervisor guidance.
 
-> **Confirmed, not a question:** the **Observatory Monitor** (lightweight web
-> instrument panel on RPSG01) was confirmed by the supervisor as **M003
-> PR 2** — a separate follow-up PR. It is intentionally *not* part of the
-> M003 PR 1 branch (`a001/m003-fleet-registry-collectors`).
+**Status 2026-07-20:** all six questions received supervisor direction in the
+pre-PR review pass; the resolutions below are implemented on the PR 1 branch
+and await formal confirmation at Gate G3.
 
-## 1. Fleet ID for the Observatory backend itself: `OBS01`
+> **PR split (supervisor-defined):**
+> **PR 1** — Fleet Registry; mission persistence and projections; heartbeat
+> and offline/online processing; read-only APIs; backend self-monitoring;
+> schemas and storage; tests; architecture and decision documentation.
+> **PR 2** (branch `a001/m003-collectors-monitor`) — deployable RPSG01
+> collector utility; OpenClaw, Raspberry Pi, and Docker collectors; real
+> RPSG01 installation and validation; lightweight Observatory Monitor.
 
-FLEET.md defines identity schemes for **agents** (`A001`) and **hosts**
-(`RPSG01`) but not for *services*. M003 requires the registry to include the
-"Observatory Backend" and the backend emits its own heartbeat, so it needs a
-Fleet ID. `OBS` was used as a service prefix (`OBS01`, configurable via
-`FLEET_ID`) pending a ruling.
+## 1. Fleet ID for the Observatory backend itself — **RESOLVED: `OBLN01`**
 
-**Needs ruling:** confirm `OBS01` (and reserve a service-prefix scheme in
-FLEET.md), or assign a different convention. Fleet IDs are immutable, so a
-rename before wider rollout is cheap; after it, it is not.
+FLEET.md originally defined identity schemes for agents (`A001`) and hosts
+(`RPSG01`) but not for *services*. The interim `OBS01` placeholder is
+**replaced** by the refined identity model (supervisor direction,
+2026-07-20):
 
-## 2. Mutable registry/mission state in ClickHouse → SD-018 (proposed)
+- New `asset_type` field: `agent | node | service | device | sensor`.
+- **`RPSG01` is the physical Raspberry Pi node; the Observatory backend
+  running on it is a separate `service` asset** — software and hosts are
+  different asset types.
+- Service Fleet IDs: `<DEPLOYMENT-TYPE><NN>` with reserved prefixes
+  **`OBLN`** (Observatory Local Node deployment) and **`OBCN`** (Observatory
+  Central Node deployment). The backend on RPSG01 is **`OBLN01`**.
+- Placement/role/version are **explicit relationship fields**
+  (`host_fleet_id=RPSG01`, `deployment_role=local`, `service_version=v1`),
+  never encoded into or parsed out of the immutable Fleet ID. Re-hosting or
+  upgrading updates attributes and does **not** mint a new identity; a
+  genuinely new deployment (second local node, the central node) does.
 
-ClickHouse (SD-005) is append-optimized; M003 introduces mutable state
-(registry lifecycle, mission projections). Implemented as versioned rows on
-`ReplacingMergeTree(revision)` with `FINAL` reads instead of introducing a
-second OLTP database.
+Full scheme and lifecycle consequences: [FLEET.md](../FLEET.md) §“Service
+Identity Scheme”. Implemented in migration 0002, seed data, models, and API.
 
-**Needs ruling:** approve
-[SD-018](decisions/SD-018-clickhouse-versioned-row-state.md).
+## 2. Mutable registry/mission state in ClickHouse → SD-018 — **RESOLVED (wording final, approval at G3)**
 
-## 3. Standard-library-only collectors → SD-019 (proposed)
+ClickHouse (SD-005) is append-optimized; M003 introduces mutable state.
+Implemented as versioned rows on `ReplacingMergeTree(revision)`.
 
-Collectors run on fleet hosts with zero third-party dependencies (no
-virtualenv, no `pip install`, no dependency CVE surface on hosts); metrics
-come from `/proc`//`/sys` and platform CLIs.
+**Merge-independence guarantee (verified in code):** all latest-row reads in
+`backend/app/storage/clickhouse.py` use `SELECT … FINAL`, which collapses
+row versions at query time — correctness **never depends on background
+merges**; a new revision is visible on the next read. `revision` is
+`time.time_ns()` with per-backend write serialization, so it is strictly
+increasing per key. Details: [SD-018](decisions/SD-018-clickhouse-versioned-row-state.md)
+(final wording, Status: Proposed — supervisor flips to Approved at review).
 
-**Needs ruling:** approve
-[SD-019](decisions/SD-019-stdlib-only-collectors.md).
+## 3. Standard-library-only collectors → SD-019 — **RESOLVED (wording final, approval at G3)**
 
-## 4. Registry/missions API reads require a collector API key
+Collectors run on fleet hosts with zero third-party dependencies. The
+deployable collector package ships in PR 2; SD-019 governs it.
+Details: [SD-019](decisions/SD-019-stdlib-only-collectors.md) (final wording,
+Status: Proposed).
 
-M003 §7 asks for a *read-only* API but does not specify its authentication.
-docs/security.md §3 ("no anonymous access") was applied: `GET /api/v1/fleet*`
-and `GET /api/v1/missions*` require a valid collector key (any bound identity
-may read; there are no read-scoped roles yet).
+## 4. Read-API authentication — **RESOLVED: authenticated identity reads, reconciled with SD-017**
 
-**Needs ruling:** is collector-key read access acceptable until RBAC arrives
-(architecture §2.8), or should reads get dedicated read-only keys now?
+`GET /api/v1/fleet*` and `GET /api/v1/missions*` require a valid API key
+(docs/security.md §3: no anonymous access, ever). Reconciliation with
+[SD-017](decisions/SD-017-api-key-bound-to-fleet-identity.md):
 
-## 5. Mission lifecycle semantics: forward-only with skips and backfill
+- SD-017's property — *every key resolves to exactly one Fleet identity* —
+  holds for reads too: read access is authenticated **and attributable** to
+  a fleet identity (audit logging), even though its enforcement bite is on
+  the write path (no cross-identity event submission).
+- Any bound identity may read the whole registry: all current identities are
+  trusted fleet infrastructure, and fleet-wide visibility is the point of
+  the registry. There is no read-scope mechanism yet.
+- Dedicated read-only keys / RBAC arrive with the frontend milestone
+  (architecture §2.8); introducing a parallel key scheme now would duplicate
+  that work without a consumer.
 
-The M003 lifecycle diagram is linear
-(Created → Queued → Assigned → Running → Review → Completed). Implemented
-interpretation, validated at ingestion:
+## 5. Mission lifecycle semantics — **RESOLVED: exact transition graph defined**
 
-- states move **forward only** (no regression, e.g. Review → Running is
-  rejected as an illegal transition);
-- **skipping** intermediate states is allowed (e.g. Created → Assigned), so
-  coarse-grained reporters stay compatible;
-- the **first report** of an unknown mission may enter at any state
-  (backfill for missions that predate tracking, e.g. M001/M002);
-- **repeating** the current state is allowed and refreshes metadata
-  (`pr_ref`, `commit_sha`) idempotently.
+With states indexed `Created=0, Queued=1, Assigned=2, Running=3, Review=4,
+Completed=5`, a reported transition `current → new` is **legal iff
+`index(new) ≥ index(current)`**:
 
-Duration is computed as first-Running → Completed.
+| From \ To | Created | Queued | Assigned | Running | Review | Completed |
+| --- | --- | --- | --- | --- | --- | --- |
+| *(unknown)* | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Created | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Queued | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Assigned | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ |
+| Running | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ |
+| Review | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ |
+| Completed | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
 
-**Needs ruling:** confirm these semantics, in particular whether a
-regression path (e.g. Review → Running after review findings) should ever be
-legal — currently it requires a new mission report or is rejected.
+- Self-loops (diagonal) are idempotent metadata refreshes
+  (`pr_ref`/`commit_sha`).
+- Skipping forward is allowed (coarse-grained reporters stay compatible).
+- The *(unknown)* row allows first reports to enter at any state (backfill
+  for missions predating tracking, e.g. M001/M002).
+- **Regression is rejected (409).** Review findings are represented by
+  staying in `Review` until rework lands — not by moving backwards. If a
+  regression path is ever needed, it will be proposed as a lifecycle change,
+  not silently allowed.
+- Duration = first-`Running` → `Completed`.
 
-## 6. Mission transitions arrive as telemetry events from collectors
+Implemented and documented in `backend/app/models/mission.py`
+(`is_valid_transition`), enforced at ingestion in
+`backend/app/services/pipeline.py`.
 
-Mission state changes are ingested as `mission_update` events through the
-authenticated `POST /api/v1/events` pipeline (the agent collector reports
-them from the agent's state file). The event stream is the durable
-transition record; the backend maintains a validated current-state
-projection. There is no separate write API for missions, and the backend
-does not create missions on its own.
+## 6. Mission records via collector telemetry — **RESOLVED: observed state only, never canonical**
 
-**Needs ruling:** confirm that mission tracking may remain purely
-collector-reported for now (a supervisor/manual write path can be added
-later without changing the model).
+Confirmed model: **collectors may report *observed* mission state but cannot
+authoritatively create or mutate canonical mission records.**
+
+- Mission state changes arrive as `mission_update` events through the
+  authenticated `POST /api/v1/events` pipeline; the event stream is the
+  durable, auditable transition record.
+- The backend's `missions` table is a **validated projection** of that
+  observed stream (transition rules above), not a canonical registry; the
+  canonical mission definition remains the supervisor's mission documents.
+- This mirrors the registry rule (collectors can never create or modify
+  fleet *identities* — enforced: heartbeats for unknown Fleet IDs are
+  rejected 403); the difference is that mission *observations* are accepted
+  and projected, while identity is seeded/administered only.
+- A supervisor/manual write path can be added later without changing the
+  model.
 
 ---
 
-Written under Mission M003 by A001-OC01-RPSG01 · pending Gate G3 review.
+Written under Mission M003 by A001-OC01-RPSG01 · resolutions implemented
+2026-07-20, pending formal Gate G3 confirmation.
