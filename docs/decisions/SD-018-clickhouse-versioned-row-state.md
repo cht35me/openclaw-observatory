@@ -49,6 +49,23 @@ run at ClickHouse's discretion. The Observatory **never relies on that**:
 - `FINAL`'s cost is proportional to unmerged parts of tiny tables (tens of
   assets, hundreds of missions) — negligible at fleet scale.
 
+## Single-writer assumption — explicit scope limit
+
+`time.time_ns()` revision ordering is valid **only under a single
+authoritative backend writer with local write serialization** (one backend
+process; all writes to a given key pass through that process's storage lock).
+It is a *local* ordering mechanism and **must not be presented or reused as a
+distributed ordering mechanism**: wall clocks across processes or hosts are
+not comparable (clock skew, NTP steps), and two concurrent writers could mint
+non-monotonic revisions for the same key.
+
+Consequently, any future deployment with **multiple writers** — horizontal
+backend scaling, active/active instances, or synchronized central/local
+Observatory deployments (SD-001) reconciling state — **requires a different
+versioning strategy** (for example: a coordination-store sequence, per-key
+server-side sequences, or hybrid logical clocks), to be introduced through a
+superseding decision before such a topology is deployed.
+
 ## Alternatives considered
 
 | Alternative | Why not |

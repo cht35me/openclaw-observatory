@@ -116,6 +116,12 @@ def _revision() -> int:
     Nanosecond wall-clock: strictly increasing for the practically relevant
     case (updates to one key are serialized through the storage lock and are
     seconds apart for registry/mission churn).
+
+    SD-018 scope limit: this assumes a SINGLE authoritative backend writer
+    with local write serialization. It is not a distributed ordering
+    mechanism — multi-writer or synchronized central/local deployments
+    require a different versioning strategy (superseding decision) before
+    such a topology exists.
     """
     return time.time_ns()
 
