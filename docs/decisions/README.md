@@ -24,3 +24,5 @@ a new decision that supersedes it.
 | [SD-015](SD-015-compose-layout-phase1.md) | Keep current compose layout during Phase 1 | Approved |
 | [SD-016](SD-016-plain-sql-migrations.md) | Plain ordered SQL migrations, no framework | Approved |
 | [SD-017](SD-017-api-key-bound-to-fleet-identity.md) | API key bound to exactly one Fleet identity | Approved |
+| [SD-018](SD-018-clickhouse-versioned-row-state.md) | Mutable registry/mission state as versioned rows in ClickHouse | Proposed |
+| [SD-019](SD-019-stdlib-only-collectors.md) | Collectors are standard-library-only Python | Proposed |
