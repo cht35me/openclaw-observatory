@@ -9,6 +9,8 @@ changes only within v1; breaking changes require ``/api/v2/``.
 from fastapi import APIRouter
 
 from app.api.v1.events import router as events_router
+from app.api.v1.fleet import router as fleet_router
+from app.api.v1.missions import router as missions_router
 
 #: All v1 routers, registered by :func:`app.main.create_app`.
-routers: tuple[APIRouter, ...] = (events_router,)
+routers: tuple[APIRouter, ...] = (events_router, fleet_router, missions_router)

@@ -13,9 +13,10 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
-from app.api.deps import MetricsDep, StorageDep
+from app.api.deps import MetricsDep, PipelineDep, StorageDep
 from app.auth import CollectorPrincipal, require_collector
 from app.models.event import Event, EventAccepted, EventIn
+from app.services.pipeline import PipelineRejection
 from app.storage.base import StorageError
 
 _logger = logging.getLogger("observatory.ingestion")
@@ -37,14 +38,16 @@ async def ingest_event(
     request: Request,
     storage: StorageDep,
     metrics: MetricsDep,
+    pipeline: PipelineDep,
     principal: Annotated[CollectorPrincipal, Depends(require_collector)],
 ) -> EventAccepted:
     """Validate, stamp, and persist a single collector event.
 
     Returns **202 Accepted** with the assigned event ID, **403** if the
     authenticated identity does not own the submitted ``collector_id``
-    (SD-017), or **503** if the storage backend is unavailable (collectors
-    retry with backoff per docs/architecture.md §4).
+    (SD-017), **409/422** if an event-type handler rejects the payload or a
+    mission transition (M003), or **503** if the storage backend is
+    unavailable (collectors retry with backoff per docs/architecture.md §4).
     """
     # Expose the collector identity to the request-logging middleware.
     request.state.collector_id = inbound.collector_id
@@ -65,6 +68,21 @@ async def ingest_event(
             detail="API key is not authorized for this collector_id.",
         )
 
+    # M003: event types with server-side semantics (heartbeat,
+    # mission_update) get pre-persistence validation so invalid payloads and
+    # illegal mission transitions never enter the event stream.
+    try:
+        await pipeline.validate(inbound)
+    except PipelineRejection as rejection:
+        metrics.events_ingestion_failures_total.labels(reason=rejection.reason).inc()
+        _logger.warning(
+            "event rejected by pipeline handler",
+            extra={"collector_id": inbound.collector_id},
+        )
+        raise HTTPException(
+            status_code=rejection.status_code, detail=rejection.detail
+        ) from None
+
     event = Event.from_ingest(inbound)
     try:
         await storage.insert_event(event)
@@ -72,6 +90,22 @@ async def ingest_event(
         metrics.events_ingestion_failures_total.labels(reason="storage_error").inc()
         _logger.exception(
             "event persistence failed",
+            extra={"collector_id": inbound.collector_id, "event_id": str(event.id)},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Storage backend unavailable; retry later.",
+        ) from None
+
+    # Post-persistence projections (mission state, heartbeat metrics). A
+    # failure here yields 503 so the collector retries; handlers are
+    # idempotent under retry (the event itself is already stored).
+    try:
+        await pipeline.apply(event)
+    except StorageError:
+        metrics.events_ingestion_failures_total.labels(reason="projection_error").inc()
+        _logger.exception(
+            "event projection failed",
             extra={"collector_id": inbound.collector_id, "event_id": str(event.id)},
         )
         raise HTTPException(

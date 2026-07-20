@@ -15,7 +15,9 @@ from fastapi import Depends, Request
 
 from app.config import Settings
 from app.metrics import AppMetrics
-from app.storage.base import EventStorage
+from app.services.pipeline import EventPipeline
+from app.services.registry import RegistryService
+from app.storage.base import EventStorage, MissionStorage
 
 
 def get_settings(request: Request) -> Settings:
@@ -33,6 +35,24 @@ def get_metrics(request: Request) -> AppMetrics:
     return request.app.state.metrics
 
 
+def get_registry_service(request: Request) -> RegistryService:
+    """Return the Fleet Registry read-model service."""
+    return request.app.state.registry_service
+
+
+def get_mission_storage(request: Request) -> MissionStorage:
+    """Return the mission projection storage backend."""
+    return request.app.state.mission_storage
+
+
+def get_pipeline(request: Request) -> EventPipeline:
+    """Return the per-event-type ingestion pipeline."""
+    return request.app.state.pipeline
+
+
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 StorageDep = Annotated[EventStorage, Depends(get_storage)]
 MetricsDep = Annotated[AppMetrics, Depends(get_metrics)]
+RegistryServiceDep = Annotated[RegistryService, Depends(get_registry_service)]
+MissionStorageDep = Annotated[MissionStorage, Depends(get_mission_storage)]
+PipelineDep = Annotated[EventPipeline, Depends(get_pipeline)]
