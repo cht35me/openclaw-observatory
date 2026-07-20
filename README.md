@@ -11,11 +11,18 @@ supervisor a single place to answer: **what is the fleet doing, is it healthy, a
 anything need my attention?**
 
 The M001 foundation phase (documentation, architecture, governance) is complete:
-architecture and technology decisions **SD-001…SD-017** are recorded in
-[docs/decisions/](docs/decisions/README.md). Mission **M002** delivers the first
+architecture and technology decisions **SD-001…SD-017** (approved) and
+**SD-018…SD-019** (proposed under M003) are recorded in
+[docs/decisions/](docs/decisions/README.md). Mission **M002** delivered the first
 production code: the core backend skeleton in [backend/](backend/) — an authenticated,
 versioned ingestion API backed by ClickHouse, with health, metrics, and structured
-logging. See [Backend Service](#backend-service-m002).
+logging. Mission **M003** adds Observatory self-awareness in two PRs: **PR 1**
+(this branch) delivers the Fleet Registry, mission lifecycle tracking, heartbeat
+and offline/online processing, read-only APIs, backend self-monitoring, and the
+refined fleet identity model; **PR 2** (branch `a001/m003-collectors-monitor`)
+delivers the deployable RPSG01 collectors and the lightweight Observatory
+Monitor. See [Backend Service](#backend-service-m002m003) and
+[Collectors](#collectors-m003-pr-2).
 
 The Observatory is designed in two variants
 ([SD-001](docs/decisions/SD-001-central-and-local-observability.md)):
@@ -67,19 +74,46 @@ See [docs/vision.md](docs/vision.md) for the full vision.
 - Alerting: notify the supervisor (e.g., via Telegram) only when attention is required
 - Plugin modules for future capabilities
 
-The foundation for these — the ingestion API and storage layer — exists as of M002;
-the capabilities themselves arrive in later missions. See [docs/roadmap.md](docs/roadmap.md).
+The ingestion API and storage layer exist as of M002; the Fleet Registry, mission
+tracking, agent/host telemetry, heartbeats, offline detection, and health scores
+exist as of M003. The remaining capabilities arrive in later missions. See
+[docs/roadmap.md](docs/roadmap.md).
 
 ## Current Project Phase
 
-**M002 — Core Observatory backend skeleton (Phase 1).** The M001 documentation
-foundation (vision, requirements, architecture, roadmap, security strategy, deployment
-strategy, governance, decisions SD-001…SD-012) is merged. M002 adds the first
-executable backend: FastAPI service, ClickHouse storage, collector API-key
-authentication, Prometheus metrics, structured JSON logging, tests, and Docker
-packaging.
+**M003 — Observatory self-awareness (Phase 2).** On top of the merged M002 backend
+(FastAPI service, ClickHouse storage, collector API-key authentication, Prometheus
+metrics, structured JSON logging, tests, Docker packaging), M003 delivers:
 
-## Backend Service (M002)
+**PR 1 (this branch):**
+
+- **Fleet Registry** — authoritative identity inventory seeded from
+  [FLEET.md](FLEET.md) (RPSG01, A001, OBLN01), with asset types
+  (`agent`/`node`/`service`/`device`/`sensor`), explicit host relationships
+  (`host_fleet_id`), nicknames, capabilities, arbitrary filter tags, and
+  immutable Fleet IDs. The physical Pi (`RPSG01`, a *node*) and the
+  Observatory deployment running on it (`OBLN01`, a *service*) are distinct
+  assets.
+- **Mission tracking** — persistent lifecycle
+  (Created → Queued → Assigned → Running → Review → Completed), forward-only
+  validated transitions as events, computed duration, PR reference and commit SHA.
+- **Heartbeats & offline detection** — versioned heartbeats
+  (collector type/version, schema version), configurable timeout, OFFLINE/ONLINE
+  transition events, Prometheus fleet metrics, and the backend's own
+  self-heartbeat (`OBLN01` monitors itself).
+- **Health score** — Healthy/Warning/Critical/Offline computed from heartbeat age,
+  CPU temperature, disk, RAM, and collector failures.
+
+**PR 2** (branch `a001/m003-collectors-monitor`, supervisor-confirmed follow-up):
+the deployable **Raspberry Pi host collector** (CPU/temperature/RAM/disk/load/
+uptime/network + Docker telemetry), the **OpenClaw agent collector** (agent
+status, mission updates, runtime/model), real installation and validation on
+RPSG01, and the lightweight **Observatory Monitor** web panel.
+
+Judgment calls and their resolutions for the Gate G3 review are in
+[docs/M003-open-questions.md](docs/M003-open-questions.md).
+
+## Backend Service (M002/M003)
 
 The backend lives in [backend/](backend/): a Python 3.13 / FastAPI service that
 accepts authenticated telemetry events over a versioned REST API (SD-004) and stores
@@ -113,7 +147,11 @@ This starts ClickHouse (internal-only; no host port) and the backend on
 | --- | --- | --- |
 | `GET /health` | none ([SD-013](docs/decisions/SD-013-health-endpoint-unauthenticated.md)) | Status (`ok`/`degraded`), version, uptime, DB connectivity. Always HTTP 200; a DB outage flips `status` to `degraded` (a liveness probe must not restart a healthy API process). |
 | `GET /metrics` | none, internal-only ([SD-014](docs/decisions/SD-014-metrics-endpoint-unauthenticated.md)) | Prometheus metrics: request count/latency, ingestion successes/failures, DB latency. Protected by network boundaries (firewall/reverse proxy/tailnet), never exposed publicly. |
-| `POST /api/v1/events` | `X-API-Key` | Ingest one telemetry event (strictly validated JSON). Returns `202` with the assigned event UUID. Each key is bound to one collector identity ([SD-017](docs/decisions/SD-017-api-key-bound-to-fleet-identity.md)); submitting another `collector_id` returns `403`. |
+| `POST /api/v1/events` | `X-API-Key` | Ingest one telemetry event (strictly validated JSON). Returns `202` with the assigned event UUID. Each key is bound to one collector identity ([SD-017](docs/decisions/SD-017-api-key-bound-to-fleet-identity.md)); submitting another `collector_id` returns `403`. Event types with server-side semantics (`heartbeat`, `mission_update`) are validated against their payload schemas and drive projections. |
+| `GET /api/v1/fleet` | `X-API-Key` | List all Fleet Registry assets with derived connectivity, last heartbeat, and computed health score (read-only). |
+| `GET /api/v1/fleet/{id}` | `X-API-Key` | One registry asset by Fleet ID, or `404`. |
+| `GET /api/v1/missions` | `X-API-Key` | List tracked missions with lifecycle state and computed duration (read-only). |
+| `GET /api/v1/missions/{id}` | `X-API-Key` | One mission by ID (e.g. `M003`), or `404`. |
 
 Example ingestion:
 
@@ -137,6 +175,30 @@ curl -s -X POST http://127.0.0.1:8000/api/v1/events \
 | `LOG_LEVEL` | `INFO` | Structured-log level |
 | `APP_VERSION` | `0.1.0` | Version reported by `/health` and metrics |
 | `MAX_REQUEST_BYTES` | `1048576` | Request body size limit (middleware-enforced) |
+| `FLEET_ID` | `OBLN01` | The backend's own Fleet Registry *service* identity (it heartbeats itself; FLEET.md service scheme) |
+| `COLLECTOR_NAME` | `observatory-backend` | Name reported in the backend's own heartbeat |
+| `HEARTBEAT_INTERVAL` | `30` | Seconds between the backend's own heartbeats |
+| `OFFLINE_TIMEOUT` | `90` | Heartbeat age (seconds) after which an asset is OFFLINE |
+| `OFFLINE_CHECK_INTERVAL` | `15` | Seconds between offline-detector sweeps |
+| `BACKGROUND_TASKS_ENABLED` | `true` | Master switch for background loops (tests disable) |
+| `HEALTH_*` | see `app/config.py` | Health-score thresholds (CPU temp, disk, RAM, heartbeat age, failures) |
+
+Collector-side configuration (`HEARTBEAT_INTERVAL`, `OFFLINE_TIMEOUT` analogue,
+`FLEET_ID`, `COLLECTOR_NAME`, `MISSION_POLL_INTERVAL`, …) ships with the
+collectors in M003 PR 2.
+
+## Collectors (M003 PR 2)
+
+Push-based telemetry producers ([SD-002](docs/decisions/SD-002-push-based-collectors.md))
+arrive with **M003 PR 2** (branch `a001/m003-collectors-monitor`): the
+**Raspberry Pi host collector** (system metrics, Docker telemetry, heartbeats)
+and the **OpenClaw agent collector** (agent status, mission updates,
+heartbeats). They are standard-library-only Python
+([SD-019](docs/decisions/SD-019-stdlib-only-collectors.md), proposed) — no
+`pip install` on fleet hosts — and ship with systemd units. The backend-side
+contract they must satisfy (payload schemas for `heartbeat` and
+`mission_update`, SD-017 key↔identity binding, registry-known Fleet IDs) is
+fully defined and enforced by this backend.
 
 ### Local development and tests
 
@@ -178,8 +240,12 @@ reachable (e.g. via `docker compose up clickhouse`).
     ├── roadmap.md              # Staged development milestones
     ├── security.md             # Security strategy and threat model
     ├── deployment.md           # Intended deployment lifecycle
+    ├── M003-open-questions.md  # M003 judgment calls and resolutions (Gate G3)
     └── decisions/              # Supervisor decision records (SD-NNN-name.md)
 ```
+
+The `collectors/` directory (stdlib-only collector package, systemd units) is
+added by M003 PR 2 from branch `a001/m003-collectors-monitor`.
 
 The full target structure (frontend, collectors, schemas, infra, tests) is documented
 in [docs/architecture.md](docs/architecture.md#5-proposed-repository-structure).
@@ -218,7 +284,7 @@ M001. See [docs/deployment.md](docs/deployment.md).
 | [docs/vision.md](docs/vision.md) | Long-term Mission Control vision |
 | [docs/requirements.md](docs/requirements.md) | Requirements: M001, MVP, future, out of scope |
 | [docs/architecture.md](docs/architecture.md) | Architecture, decisions, and trade-offs |
-| [docs/decisions/](docs/decisions/README.md) | Supervisor decision records (SD-001…SD-017) |
+| [docs/decisions/](docs/decisions/README.md) | Supervisor decision records (SD-001…SD-017 approved; SD-018…SD-019 proposed) |
 | [docs/roadmap.md](docs/roadmap.md) | Staged milestones with dependencies and gates |
 | [docs/security.md](docs/security.md) | Threat model and security strategy |
 | [docs/deployment.md](docs/deployment.md) | Deployment lifecycle and operations |

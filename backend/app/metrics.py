@@ -24,6 +24,15 @@ class AppMetrics:
     events_ingestion_failures_total: Counter
     db_latency_seconds: Histogram
     app_info: Gauge
+    # --- Fleet / heartbeat metrics (Mission M003) ---
+    fleet_registered_assets: Gauge
+    fleet_active_assets: Gauge
+    fleet_offline_assets: Gauge
+    fleet_unknown_assets: Gauge
+    heartbeats_received_total: Counter
+    heartbeat_latency_seconds: Histogram
+    collector_reported_failures: Gauge
+    offline_transitions_total: Counter
 
     @classmethod
     def create(cls, version: str) -> AppMetrics:
@@ -70,6 +79,50 @@ class AppMetrics:
             registry=registry,
         )
         app_info.labels(version=version).set(1)
+        fleet_registered_assets = Gauge(
+            "observatory_fleet_registered_assets",
+            "Assets present in the Fleet Registry.",
+            registry=registry,
+        )
+        fleet_active_assets = Gauge(
+            "observatory_fleet_active_assets",
+            "Registry assets currently online (fresh heartbeat).",
+            registry=registry,
+        )
+        fleet_offline_assets = Gauge(
+            "observatory_fleet_offline_assets",
+            "Registry assets whose newest heartbeat exceeded OFFLINE_TIMEOUT.",
+            registry=registry,
+        )
+        fleet_unknown_assets = Gauge(
+            "observatory_fleet_unknown_assets",
+            "Registry assets that have never sent a heartbeat.",
+            registry=registry,
+        )
+        heartbeats_received_total = Counter(
+            "observatory_heartbeats_received_total",
+            "Heartbeat events accepted, by collector identity and type.",
+            labelnames=("collector_id", "collector_type"),
+            registry=registry,
+        )
+        heartbeat_latency_seconds = Histogram(
+            "observatory_heartbeat_latency_seconds",
+            "Delay between heartbeat source timestamp and ingestion.",
+            labelnames=("collector_id",),
+            registry=registry,
+        )
+        collector_reported_failures = Gauge(
+            "observatory_collector_reported_failures",
+            "Cumulative failure count self-reported in a collector's newest heartbeat.",
+            labelnames=("collector_id",),
+            registry=registry,
+        )
+        offline_transitions_total = Counter(
+            "observatory_offline_transitions_total",
+            "Connectivity transitions detected (direction: offline|online).",
+            labelnames=("collector_id", "direction"),
+            registry=registry,
+        )
         return cls(
             registry=registry,
             http_requests_total=http_requests_total,
@@ -78,6 +131,14 @@ class AppMetrics:
             events_ingestion_failures_total=events_ingestion_failures_total,
             db_latency_seconds=db_latency_seconds,
             app_info=app_info,
+            fleet_registered_assets=fleet_registered_assets,
+            fleet_active_assets=fleet_active_assets,
+            fleet_offline_assets=fleet_offline_assets,
+            fleet_unknown_assets=fleet_unknown_assets,
+            heartbeats_received_total=heartbeats_received_total,
+            heartbeat_latency_seconds=heartbeat_latency_seconds,
+            collector_reported_failures=collector_reported_failures,
+            offline_transitions_total=offline_transitions_total,
         )
 
     def observe_db_latency(self, operation: str, seconds: float) -> None:

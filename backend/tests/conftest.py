@@ -15,12 +15,20 @@ from fastapi.testclient import TestClient
 
 from app.config import Settings
 from app.main import create_app
-from app.storage.memory import InMemoryEventStorage
+from app.storage.memory import (
+    InMemoryEventStorage,
+    InMemoryMissionStorage,
+    InMemoryRegistryStorage,
+)
 
 #: Key → identity bindings for the test app (SD-017; never real credentials).
+#: demo/other-collector exercise generic ingestion; RPSG01/A001 are seeded
+#: Fleet Registry identities used by the M003 heartbeat/mission tests.
 TEST_KEY_BINDINGS: dict[str, str] = {
     "test-key-alpha": "demo",
     "test-key-beta": "other-collector",
+    "test-key-rpsg01": "RPSG01",
+    "test-key-a001": "A001",
 }
 TEST_API_KEYS = tuple(TEST_KEY_BINDINGS)
 
@@ -53,6 +61,7 @@ def settings() -> Settings:
         app_version="0.0.0-test",
         log_level="INFO",
         max_request_bytes=4096,
+        background_tasks_enabled=False,  # deterministic tests; loops tested directly
     )
 
 
@@ -63,8 +72,34 @@ def storage() -> InMemoryEventStorage:
 
 
 @pytest.fixture
-def client(settings: Settings, storage: InMemoryEventStorage) -> Iterator[TestClient]:
-    """HTTP client against a fully wired app (lifespan running)."""
-    app = create_app(settings=settings, storage=storage)
+def registry_storage() -> InMemoryRegistryStorage:
+    """Fresh in-memory Fleet Registry backend per test."""
+    return InMemoryRegistryStorage()
+
+
+@pytest.fixture
+def mission_storage() -> InMemoryMissionStorage:
+    """Fresh in-memory mission projection backend per test."""
+    return InMemoryMissionStorage()
+
+
+@pytest.fixture
+def client(
+    settings: Settings,
+    storage: InMemoryEventStorage,
+    registry_storage: InMemoryRegistryStorage,
+    mission_storage: InMemoryMissionStorage,
+) -> Iterator[TestClient]:
+    """HTTP client against a fully wired app (lifespan running).
+
+    The app seeds the Fleet Registry from :mod:`app.services.seed` during
+    startup, so the registry contains A001/RPSG01/OBLN01 in every test.
+    """
+    app = create_app(
+        settings=settings,
+        storage=storage,
+        registry_storage=registry_storage,
+        mission_storage=mission_storage,
+    )
     with TestClient(app) as test_client:
         yield test_client

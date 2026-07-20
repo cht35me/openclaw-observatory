@@ -15,6 +15,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 
 from app.models.event import Event
+from app.models.mission import MissionRecord
+from app.models.registry import FleetAsset
 
 
 class StorageError(Exception):
@@ -60,3 +62,79 @@ class EventStorage(ABC):
         M002 needs only this simple read path (used by tests and future
         verification tooling); richer querying arrives with later missions.
         """
+
+    async def latest_event(
+        self, collector_id: str, event_type: str
+    ) -> Event | None:
+        """Return the most recent event of ``event_type`` for one collector.
+
+        Default implementation on top of :meth:`query_events`; backends may
+        override with a more efficient query.
+        """
+        events = await self.query_events(
+            collector_id=collector_id, event_type=event_type, limit=1
+        )
+        return events[0] if events else None
+
+
+class RegistryStorage(ABC):
+    """Interface for Fleet Registry persistence (M003 §1).
+
+    The registry holds *identity and lifecycle* state only — mutable, but
+    low-churn (seeding, commissioning, lifecycle changes). Telemetry-derived
+    fields (last heartbeat, connectivity, health) are computed from the event
+    stream at read time and never stored here.
+
+    Writes happen exclusively through backend administration paths (seeding
+    at startup today); collectors have no route that reaches
+    :meth:`upsert_asset` — Fleet IDs are immutable from a collector's point
+    of view.
+    """
+
+    @abstractmethod
+    async def startup(self) -> None:
+        """Prepare the backend. Idempotent; may raise :class:`StorageError`."""
+
+    @abstractmethod
+    async def shutdown(self) -> None:
+        """Release resources. Must never raise."""
+
+    @abstractmethod
+    async def upsert_asset(self, asset: FleetAsset) -> None:
+        """Insert or replace one registry entry (keyed by ``fleet_id``)."""
+
+    @abstractmethod
+    async def get_asset(self, fleet_id: str) -> FleetAsset | None:
+        """Return one registry entry, or ``None`` when unknown."""
+
+    @abstractmethod
+    async def list_assets(self) -> list[FleetAsset]:
+        """Return all registry entries, ordered by ``fleet_id``."""
+
+
+class MissionStorage(ABC):
+    """Interface for mission current-state projections (M003 §4).
+
+    Transition history is the event stream (``mission_update`` events); this
+    store keeps only the latest state per mission for fast reads.
+    """
+
+    @abstractmethod
+    async def startup(self) -> None:
+        """Prepare the backend. Idempotent; may raise :class:`StorageError`."""
+
+    @abstractmethod
+    async def shutdown(self) -> None:
+        """Release resources. Must never raise."""
+
+    @abstractmethod
+    async def upsert_mission(self, record: MissionRecord) -> None:
+        """Insert or replace one mission record (keyed by ``mission_id``)."""
+
+    @abstractmethod
+    async def get_mission(self, mission_id: str) -> MissionRecord | None:
+        """Return one mission record, or ``None`` when unknown."""
+
+    @abstractmethod
+    async def list_missions(self) -> list[MissionRecord]:
+        """Return all mission records, ordered by ``mission_id``."""

@@ -55,6 +55,39 @@ class Settings(BaseSettings):
     # Request size limit (bytes) enforced by middleware (security.md checklist).
     max_request_bytes: int = Field(default=1_048_576, gt=0)
 
+    # --- Fleet / self-identity (M003) ---
+    # The backend itself is a Fleet Registry *service* asset (FLEET.md:
+    # OBLN01 = Observatory Local Node deployment 01, hosted on RPSG01); it
+    # stamps its own heartbeat so the Observatory is visible in its own
+    # registry.
+    fleet_id: str = "OBLN01"
+    collector_name: str = "observatory-backend"
+
+    # --- Heartbeats and offline detection (M003 §5/§6) ---
+    # Interval (seconds) of the backend's own heartbeat; collectors have
+    # their own HEARTBEAT_INTERVAL environment variable.
+    heartbeat_interval: float = Field(default=30.0, gt=0)
+    # An asset whose newest heartbeat is older than this is OFFLINE.
+    offline_timeout: float = Field(default=90.0, gt=0)
+    # How often the offline detector scans the registry (seconds).
+    offline_check_interval: float = Field(default=15.0, gt=0)
+    # Master switch for background loops (offline detector, self-heartbeat).
+    # Tests disable it for determinism; production keeps the default.
+    background_tasks_enabled: bool = True
+
+    # --- Health-score thresholds (M003 §9) ---
+    health_cpu_temp_warning_c: float = 70.0
+    health_cpu_temp_critical_c: float = 80.0
+    health_disk_warning_percent: float = 80.0
+    health_disk_critical_percent: float = 90.0
+    health_ram_warning_percent: float = 85.0
+    health_ram_critical_percent: float = 95.0
+    # Heartbeat age (as a multiple of offline_timeout) that degrades health
+    # to Warning before the hard offline cut-off is reached.
+    health_heartbeat_warning_ratio: float = Field(default=0.5, gt=0, le=1.0)
+    # A collector reporting at least this many cumulative failures is Warning.
+    health_collector_failures_warning: int = Field(default=1, ge=1)
+
     @cached_property
     def api_key_bindings(self) -> tuple[tuple[str, str], ...]:
         """Parse ``API_KEYS`` into ``(collector_id, key)`` bindings (SD-017).

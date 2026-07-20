@@ -1,0 +1,60 @@
+"""Read-only Fleet Registry API (Mission M003 §7).
+
+``GET /api/v1/fleet`` and ``GET /api/v1/fleet/{fleet_id}`` return registry
+identities decorated with derived telemetry (last heartbeat, connectivity,
+computed health).
+
+Read-only by design: the registry is the source of truth for identity, and no
+API route creates or mutates identities — seeding/administration happens
+inside the backend only (immutable Fleet IDs, M003 security requirement).
+
+Authentication: reads require a valid collector API key (docs/security.md §3:
+no anonymous read access, ever). Any authenticated fleet identity may read
+the registry; per-role authorization arrives with the RBAC milestone
+(architecture §2.8).
+"""
+
+from __future__ import annotations
+
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, status
+
+from app.api.deps import RegistryServiceDep
+from app.auth import CollectorPrincipal, require_collector
+from app.models.registry import FleetAssetView
+
+router = APIRouter(prefix="/api/v1", tags=["fleet"])
+
+
+@router.get(
+    "/fleet",
+    response_model=list[FleetAssetView],
+    summary="List all Fleet Registry assets",
+)
+async def list_fleet(
+    registry: RegistryServiceDep,
+    _principal: Annotated[CollectorPrincipal, Depends(require_collector)],
+) -> list[FleetAssetView]:
+    """Return every registry asset with derived connectivity and health."""
+    return await registry.list_views()
+
+
+@router.get(
+    "/fleet/{fleet_id}",
+    response_model=FleetAssetView,
+    summary="Fetch one Fleet Registry asset",
+)
+async def get_fleet_asset(
+    fleet_id: str,
+    registry: RegistryServiceDep,
+    _principal: Annotated[CollectorPrincipal, Depends(require_collector)],
+) -> FleetAssetView:
+    """Return one registry asset, or 404 when the Fleet ID is unknown."""
+    view = await registry.get_view(fleet_id)
+    if view is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Unknown fleet_id.",
+        )
+    return view
