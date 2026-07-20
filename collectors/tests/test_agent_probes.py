@@ -64,17 +64,42 @@ def test_mission_updates_deduplicated(tmp_path) -> None:
     assert len(first) == 1
     assert first[0][0] == "mission_update"
     assert first[0][1]["state"] == "Running"
+    # First observation of a mid-flight mission => privileged backfill entry.
+    assert first[0][1]["backfill"] is True
 
     # Unchanged state -> no resubmission.
     assert telemetry.produce_mission_updates() == []
 
-    # Transition -> submitted again.
+    # Transition -> submitted again, WITHOUT the backfill flag (normal
+    # one-step lifecycle move for an already-synced mission).
     STATE_DONE = dict(STATE)
-    STATE_DONE["missions"] = [{**STATE["missions"][0], "state": "Completed"}]
+    STATE_DONE["missions"] = [{**STATE["missions"][0], "state": "Review"}]
     state_file.write_text(json.dumps(STATE_DONE), encoding="utf-8")
     second = telemetry.produce_mission_updates()
     assert len(second) == 1
-    assert second[0][1]["state"] == "Completed"
+    assert second[0][1]["state"] == "Review"
+    assert "backfill" not in second[0][1]
+
+
+def test_mission_backfill_rules(tmp_path) -> None:
+    state_file = tmp_path / "agent-state.json"
+
+    # First observation at Created is a normal lifecycle entry — no backfill.
+    created = {"missions": [{"mission_id": "M009", "title": "T", "state": "Created"}]}
+    state_file.write_text(json.dumps(created), encoding="utf-8")
+    telemetry = AgentTelemetry(state_file=str(state_file))
+    events = telemetry.produce_mission_updates()
+    assert len(events) == 1
+    assert "backfill" not in events[0][1]
+
+    # An explicit backfill flag in the state file is passed through untouched
+    # (operator-driven recovery jump for an already-synced mission).
+    jump = {"missions": [{"mission_id": "M009", "title": "T", "state": "Running",
+                          "backfill": True}]}
+    state_file.write_text(json.dumps(jump), encoding="utf-8")
+    events = telemetry.produce_mission_updates()
+    assert len(events) == 1
+    assert events[0][1]["backfill"] is True
 
 
 def test_agent_status_payload_shape(tmp_path) -> None:

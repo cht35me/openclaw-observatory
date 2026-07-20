@@ -11,6 +11,15 @@ Produces:
   mission state is not resubmitted, keeping the event stream to actual
   transitions).
 
+Backfill rule (M003 open question 5, PR 2 note): the first time this
+collector observes a mission that is already mid-flight (any state other
+than ``Created``), it stamps ``backfill: true`` on that initial
+``mission_update`` — the backend only admits entry at a non-initial state
+(or a forward jump) as a privileged, audit-logged backfill transition.
+Subsequent observations follow the normal one-step lifecycle graph and are
+forwarded without the flag (unless the state file explicitly sets it, e.g.
+for operator-driven recovery jumps).
+
 Environment (beyond the shared M003 §8 variables):
 
 * ``AGENT_STATE_FILE`` — JSON status document maintained by the agent;
@@ -82,7 +91,17 @@ class AgentTelemetry:
                 continue
             if self._submitted_states.get(mission_id) == mission_state:
                 continue  # no transition since last poll
-            events.append(("mission_update", update, MISSION_UPDATE_SCHEMA))
+            payload = dict(update)
+            if (
+                mission_id not in self._submitted_states
+                and mission_state != "Created"
+                and not payload.get("backfill")
+            ):
+                # First sync of an in-flight mission: privileged entry at a
+                # non-initial state must be an explicit, audit-logged
+                # backfill (mission lifecycle rules, M003 open question 5).
+                payload["backfill"] = True
+            events.append(("mission_update", payload, MISSION_UPDATE_SCHEMA))
             self._submitted_states[mission_id] = mission_state
         return events
 
