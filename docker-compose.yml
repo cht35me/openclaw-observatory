@@ -1,0 +1,64 @@
+# Development stack for the OpenClaw Observatory backend (Mission M002).
+#
+# One-command startup:   cp .env.example .env   (edit values)   then:
+#   docker compose up
+#
+# Location note: this file lives at the repository root so that plain
+# `docker compose up` works (M002 acceptance criterion). Staging/production
+# compose definitions belong in infra/ per docs/architecture.md §5 and will
+# arrive with the deployment mission — see backend/OPEN_QUESTIONS.md.
+#
+# Security notes (docs/security.md):
+# - real secrets come from the untracked .env file; this file holds none;
+# - ClickHouse is not published on any host port (backend reaches it on the
+#   internal compose network only);
+# - the backend binds to loopback by default; expose it via the tailnet or a
+#   TLS-terminating reverse proxy, never directly on a public interface.
+
+name: openclaw-observatory
+
+services:
+  clickhouse:
+    # Official image, pinned to the 26.3 LTS line (security.md §8).
+    image: clickhouse/clickhouse-server:26.3.10
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: ${CLICKHOUSE_DATABASE:-observatory}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USERNAME:-observatory}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?set CLICKHOUSE_PASSWORD in .env (see .env.example)}
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - clickhouse-client --user "$$CLICKHOUSE_USER" --password "$$CLICKHOUSE_PASSWORD" --query "SELECT 1"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    environment:
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_DATABASE: ${CLICKHOUSE_DATABASE:-observatory}
+      CLICKHOUSE_USERNAME: ${CLICKHOUSE_USERNAME:-observatory}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?set CLICKHOUSE_PASSWORD in .env (see .env.example)}
+      API_KEYS: ${API_KEYS:?set API_KEYS in .env (see .env.example)}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      APP_VERSION: ${APP_VERSION:-0.1.0}
+    ports:
+      # Loopback by default; override BACKEND_BIND to a tailnet address.
+      - "${BACKEND_BIND:-127.0.0.1}:${BACKEND_PORT:-8000}:8000"
+
+volumes:
+  clickhouse-data:

@@ -1,0 +1,4 @@
+# Development/test dependencies — pinned per docs/security.md §8.
+-r requirements.txt
+pytest==9.1.1
+httpx2==2.7.0

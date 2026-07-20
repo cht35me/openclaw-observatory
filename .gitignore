@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Test / tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local configuration and secrets — only *.example files are committed
+.env
+.env.*
+!.env.example
+
+# Editors / OS noise
+.idea/
+.vscode/
+.DS_Store

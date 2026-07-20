@@ -51,6 +51,12 @@ credentials scope, branch protection, and human gates — not by trust.
   surface (if ever built) uses separate, stronger authentication and per-action human
   confirmation.
 - No anonymous read access, ever — including "harmless" status pages.
+  *Supervisor-approved exception:* the operational liveness endpoints `/health` and
+  `/metrics` are unauthenticated by design and protected by network boundaries
+  (loopback/tailnet/firewall/reverse proxy) instead — see
+  [SD-013](decisions/SD-013-health-endpoint-unauthenticated.md) and
+  [SD-014](decisions/SD-014-metrics-endpoint-unauthenticated.md). They expose only
+  status and aggregate metrics, never payload data or secrets.
 
 ## 4. Human Approval Gates
 
