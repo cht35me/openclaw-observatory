@@ -4,22 +4,32 @@ Mission lifecycle (linear, forward-only):
 
     Created → Queued → Assigned → Running → Review → Completed
 
-**Permitted transition graph** (exact): with the states indexed
-``Created=0 … Completed=5``, a reported transition ``current → new`` is
-legal iff ``index(new) >= index(current)``. Spelled out:
+**Permitted transition graph** (exact, supervisor-ruled at Gate G3 review):
 
-* ``Created``  → Created | Queued | Assigned | Running | Review | Completed
-* ``Queued``   → Queued | Assigned | Running | Review | Completed
-* ``Assigned`` → Assigned | Running | Review | Completed
-* ``Running``  → Running | Review | Completed
+*Normal operation* follows the explicit lifecycle graph — with states
+indexed ``Created=0 … Completed=5``, a reported transition
+``current → new`` is legal iff it is a **self-loop** (idempotent metadata
+refresh of ``pr_ref``/``commit_sha``) or the **single next step**
+(``index(new) == index(current) + 1``):
+
+* ``Created``  → Created | Queued
+* ``Queued``   → Queued | Assigned
+* ``Assigned`` → Assigned | Running
+* ``Running``  → Running | Review
 * ``Review``   → Review | Completed
 * ``Completed``→ Completed (terminal; repeats refresh metadata only)
 
-Self-loops are idempotent metadata refreshes (``pr_ref``/``commit_sha``);
-skipping forward is allowed (coarse reporters); regression is rejected with
-409 — review findings are represented by staying in ``Review`` until the
-rework lands, not by moving backwards. A mission unknown to the backend may
-enter at *any* state (backfill for missions predating tracking).
+A mission unknown to the backend enters at ``Created`` in normal operation.
+
+*Privileged backfill/recovery* (``backfill: true`` on the
+:class:`MissionUpdate` payload, audit-logged) may **enter at any state** for
+an unknown mission (missions predating tracking, e.g. M001/M002) or **jump
+forward** over intermediate states (``index(new) >= index(current)``) for
+recovery after reporting gaps.
+
+In *both* modes: **regression is rejected with 409** — review findings are
+represented by staying in ``Review`` until the rework lands, not by moving
+backwards — and **Completed remains terminal**.
 
 **Observed state, not canonical records:** transitions arrive as
 ``mission_update`` telemetry events through the normal authenticated
@@ -56,25 +66,37 @@ MISSION_STATES: tuple[str, ...] = (
 _STATE_INDEX = {state: index for index, state in enumerate(MISSION_STATES)}
 
 
-def is_valid_transition(current: str | None, new: str) -> bool:
+def is_valid_transition(current: str | None, new: str, *, backfill: bool = False) -> bool:
     """Return whether ``current → new`` is a legal lifecycle move.
 
-    Rules:
+    Normal operation (``backfill=False``):
 
-    * a mission not yet known may only enter the lifecycle (any state is
-      accepted for the first report, so late-registered missions backfill);
-    * states only move forward (skipping intermediate states is allowed —
-      e.g. ``Created → Assigned``);
-    * repeating the current state is allowed (idempotent updates that refresh
-      metadata such as ``pr_ref``/``commit_sha``).
+    * an unknown mission may only enter the lifecycle at ``Created``;
+    * a known mission may repeat its current state (idempotent metadata
+      refresh) or advance exactly one step along the lifecycle;
+    * skipping intermediate states is **not** permitted.
+
+    Privileged backfill/recovery (``backfill=True``, audit-logged at the
+    ingestion pipeline):
+
+    * an unknown mission may enter at any state (import of missions that
+      predate tracking);
+    * a known mission may jump forward over intermediate states (recovery
+      after reporting gaps).
+
+    In both modes regression is rejected and ``Completed`` is terminal
+    (only its self-loop remains legal).
     """
     if new not in _STATE_INDEX:
         return False
     if current is None:
-        return True
+        return True if backfill else new == MISSION_STATES[0]
     if current not in _STATE_INDEX:
         return False
-    return _STATE_INDEX[new] >= _STATE_INDEX[current]
+    delta = _STATE_INDEX[new] - _STATE_INDEX[current]
+    if backfill:
+        return delta >= 0
+    return delta in (0, 1)
 
 
 class MissionUpdate(BaseModel):
@@ -93,6 +115,15 @@ class MissionUpdate(BaseModel):
     )
     commit_sha: ShortText | None = None
     note: ShortText | None = None
+    backfill: bool = Field(
+        default=False,
+        description=(
+            "Privileged backfill/recovery transition: permits entering the "
+            "lifecycle at any state or jumping forward over intermediate "
+            "states. Never permits regression; Completed stays terminal. "
+            "Usage is audit-logged."
+        ),
+    )
 
 
 class MissionRecord(BaseModel):

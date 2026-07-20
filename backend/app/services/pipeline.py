@@ -162,15 +162,33 @@ class MissionUpdateHandler(EventHandler):
                 reason="validation_error",
             ) from exc
         current = await self._missions.get_mission(update.mission_id)
-        if not is_valid_transition(current.state if current else None, update.state):
+        if not is_valid_transition(
+            current.state if current else None, update.state, backfill=update.backfill
+        ):
             current_state = current.state if current else "<new>"
             raise PipelineRejection(
                 status_code=409,
                 detail=(
                     f"Illegal mission transition {current_state} -> {update.state}; "
-                    f"lifecycle order is {' -> '.join(MISSION_STATES)}."
+                    f"normal operation advances one state at a time along "
+                    f"{' -> '.join(MISSION_STATES)} (new missions enter at Created). "
+                    "Privileged backfill/recovery (backfill=true) may enter at or "
+                    "jump forward to a later state; regression is never allowed "
+                    "and Completed is terminal."
                 ),
                 reason="invalid_mission_transition",
+            )
+        if update.backfill:
+            # Audit trail for privileged transitions (security.md structured
+            # audit logging): backfill is exceptional, so every use is logged.
+            _logger.info(
+                "privileged mission backfill transition accepted",
+                extra={
+                    "mission_id": update.mission_id,
+                    "from_state": current.state if current else None,
+                    "to_state": update.state,
+                    "collector_id": inbound.collector_id,
+                },
             )
 
     async def apply(self, event: Event) -> None:

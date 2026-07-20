@@ -79,34 +79,48 @@ Status: Proposed).
 
 ## 5. Mission lifecycle semantics — **RESOLVED: exact transition graph defined**
 
-With states indexed `Created=0, Queued=1, Assigned=2, Running=3, Review=4,
-Completed=5`, a reported transition `current → new` is **legal iff
-`index(new) ≥ index(current)`**:
+Supervisor ruling (2026-07-21): **normal operation follows the explicit
+lifecycle graph; forward skips are reserved for privileged
+backfill/recovery; Completed is terminal.**
+
+**Normal operation** (`backfill` absent/false) — self-loop (idempotent
+metadata refresh) or exactly one step forward:
 
 | From \ To | Created | Queued | Assigned | Running | Review | Completed |
 | --- | --- | --- | --- | --- | --- | --- |
-| *(unknown)* | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Created | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Queued | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Assigned | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ |
-| Running | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ |
+| *(unknown)* | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| Created | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ |
+| Queued | ✗ | ✓ | ✓ | ✗ | ✗ | ✗ |
+| Assigned | ✗ | ✗ | ✓ | ✓ | ✗ | ✗ |
+| Running | ✗ | ✗ | ✗ | ✓ | ✓ | ✗ |
 | Review | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ |
 | Completed | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
 
-- Self-loops (diagonal) are idempotent metadata refreshes
-  (`pr_ref`/`commit_sha`).
-- Skipping forward is allowed (coarse-grained reporters stay compatible).
-- The *(unknown)* row allows first reports to enter at any state (backfill
-  for missions predating tracking, e.g. M001/M002).
+**Privileged backfill/recovery** (`backfill: true` on the `mission_update`
+payload; every use is audit-logged with mission, states, and collector
+identity) — may *enter at any state* for an unknown mission (import of
+missions predating tracking, e.g. M001/M002) or *jump forward* over
+intermediate states for a known mission (`index(new) ≥ index(current)`,
+recovery after reporting gaps).
+
+In **both** modes:
+
 - **Regression is rejected (409).** Review findings are represented by
   staying in `Review` until rework lands — not by moving backwards. If a
   regression path is ever needed, it will be proposed as a lifecycle change,
   not silently allowed.
+- **Completed is terminal** — only its metadata-refresh self-loop remains
+  legal, backfill included.
 - Duration = first-`Running` → `Completed`.
 
 Implemented and documented in `backend/app/models/mission.py`
 (`is_valid_transition`), enforced at ingestion in
 `backend/app/services/pipeline.py`.
+
+*PR 2 note:* a collector first observing a mission that is already mid-flight
+(e.g. the agent collector syncing an in-progress mission) must submit that
+initial observation with `backfill: true`; subsequent observations follow the
+normal one-step graph.
 
 ## 6. Mission records via collector telemetry — **RESOLVED: observed state only, never canonical**
 
