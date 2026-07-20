@@ -54,7 +54,7 @@ def test_key_cannot_submit_for_other_collector(client: TestClient) -> None:
 
 def test_cross_collector_spoofing_rejected(client: TestClient) -> None:
     """SD-017: key A claiming collector B's identity is forbidden."""
-    (key_a, collector_a), (_key_b, collector_b) = list(TEST_KEY_BINDINGS.items())
+    (key_a, collector_a), (_key_b, collector_b) = list(TEST_KEY_BINDINGS.items())[:2]
     assert collector_a != collector_b
     response = client.post(
         "/api/v1/events", json=event_for(collector_b), headers=auth_headers(key_a)

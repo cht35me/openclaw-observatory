@@ -22,9 +22,13 @@ from app.storage.memory import (
 )
 
 #: Key → identity bindings for the test app (SD-017; never real credentials).
+#: demo/other-collector exercise generic ingestion; RPSG01/A001 are seeded
+#: Fleet Registry identities used by the M003 heartbeat/mission tests.
 TEST_KEY_BINDINGS: dict[str, str] = {
     "test-key-alpha": "demo",
     "test-key-beta": "other-collector",
+    "test-key-rpsg01": "RPSG01",
+    "test-key-a001": "A001",
 }
 TEST_API_KEYS = tuple(TEST_KEY_BINDINGS)
 
