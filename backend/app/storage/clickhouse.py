@@ -1,4 +1,4 @@
-"""ClickHouse storage backend (SD-005: central Observatory storage).
+"""ClickHouse storage backends (SD-005: central Observatory storage).
 
 Uses ``clickhouse-connect`` (HTTP interface). The driver is synchronous, so
 every operation runs in a worker thread via :func:`asyncio.to_thread`; an
@@ -7,17 +7,26 @@ run concurrent queries over one session.
 
 Schema management (SD-016) uses plain, ordered SQL migration files from
 ``backend/migrations/`` (``0001_init.sql``, ``0002_...``), applied in
-filename order at startup. Applied migrations are recorded in a
-``schema_migrations`` ledger table, so startup is idempotent. No migration
-framework (no Alembic/Flyway/Liquibase) — per supervisor decision.
+filename order at startup by :class:`ClickHouseEventStorage` (the first
+backend started). Applied migrations are recorded in a ``schema_migrations``
+ledger table, so startup is idempotent. No migration framework — per
+supervisor decision.
+
+Mutable state (Fleet Registry, mission projections) follows the versioned-row
+pattern on ``ReplacingMergeTree`` (SD-018, proposed): updates insert a new
+row with a monotonically increasing ``revision``; reads use ``FINAL`` so the
+latest revision per key wins. This respects ClickHouse's append-oriented
+semantics (SD-005 consequences) instead of fighting them with mutations.
 
 Schema notes:
 
-* ``MergeTree`` ordered by ``(collector_id, event_type, timestamp)`` — the
-  natural access path (per-collector, per-type, time-ranged), append-friendly
-  per ClickHouse semantics (SD-005 consequences).
+* ``events`` — ``MergeTree`` ordered by ``(collector_id, event_type,
+  timestamp)``: the natural access path (per-collector, per-type,
+  time-ranged), append-friendly.
 * ``payload`` is stored as a JSON-serialized ``String``; typed/materialized
   columns can be added later without breaking the canonical model.
+* ``fleet_registry`` / ``missions`` — ``ReplacingMergeTree(revision)`` keyed
+  by their natural IDs (see migrations 0002/0003).
 """
 
 from __future__ import annotations
@@ -25,6 +34,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -35,7 +45,9 @@ import clickhouse_connect
 
 from app.config import Settings
 from app.models.event import Event
-from app.storage.base import EventStorage, StorageError
+from app.models.mission import MissionRecord
+from app.models.registry import FleetAsset, LifecycleStatus
+from app.storage.base import EventStorage, MissionStorage, RegistryStorage, StorageError
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from clickhouse_connect.driver.client import Client
@@ -57,24 +69,71 @@ _EVENT_COLUMNS = (
     "received_at",
 )
 
+_REGISTRY_COLUMNS = (
+    "fleet_id",
+    "nickname",
+    "hostname",
+    "role",
+    "location",
+    "platform",
+    "os",
+    "software_version",
+    "capabilities",
+    "tags",
+    "status",
+    "registered_at",
+    "updated_at",
+    "revision",
+)
+
+_MISSION_COLUMNS = (
+    "mission_id",
+    "title",
+    "assigned_agent",
+    "state",
+    "created_at",
+    "started_at",
+    "completed_at",
+    "pr_ref",
+    "commit_sha",
+    "updated_at",
+    "revision",
+)
+
+
 #: No-op latency hook used when metrics are not wired in.
 def _noop_latency(operation: str, seconds: float) -> None:  # noqa: ARG001
     return None
 
 
-class ClickHouseEventStorage(EventStorage):
-    """Event storage backed by ClickHouse.
+def _revision() -> int:
+    """Monotonic-enough revision for ReplacingMergeTree versioned rows.
 
-    ``on_db_latency`` is an optional hook (operation name, seconds) used to
-    feed the ``observatory_db_latency_seconds`` metric without coupling the
-    storage layer to Prometheus.
+    Nanosecond wall-clock: strictly increasing for the practically relevant
+    case (updates to one key are serialized through the storage lock and are
+    seconds apart for registry/mission churn).
+    """
+    return time.time_ns()
+
+
+def _as_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+class _ClickHouseConnection:
+    """Shared connection management for ClickHouse-backed storages.
+
+    Each storage instance owns one driver client (the HTTP driver is cheap);
+    all calls run in a worker thread, timed through ``on_db_latency`` and
+    serialized by a per-instance lock.
     """
 
     def __init__(
         self,
         settings: Settings,
         on_db_latency: Callable[[str, float], None] | None = None,
-        migrations_dir: Path | None = None,
     ) -> None:
         if not _IDENTIFIER_RE.match(settings.clickhouse_database):
             raise ValueError(
@@ -83,16 +142,9 @@ class ClickHouseEventStorage(EventStorage):
             )
         self._settings = settings
         self._database = settings.clickhouse_database
-        self._table = f"`{self._database}`.`events`"
-        self._migrations_table = f"`{self._database}`.`schema_migrations`"
-        self._migrations_dir = migrations_dir or DEFAULT_MIGRATIONS_DIR
         self._on_db_latency = on_db_latency or _noop_latency
         self._client: Client | None = None
         self._lock = asyncio.Lock()
-
-    # ------------------------------------------------------------------ #
-    # Connection management
-    # ------------------------------------------------------------------ #
 
     def _connect(self) -> Client:
         """Create a driver client (runs in a worker thread).
@@ -126,6 +178,44 @@ class ClickHouseEventStorage(EventStorage):
                 raise StorageError(f"ClickHouse {operation} failed") from exc
             finally:
                 self._on_db_latency(operation, loop.time() - start)
+
+    async def _close(self) -> None:
+        """Close the client; never raises."""
+        client, self._client = self._client, None
+        if client is not None:
+            try:
+                await asyncio.to_thread(client.close)
+            except Exception:  # noqa: BLE001 - shutdown must not raise
+                pass
+
+    async def _ping(self) -> bool:
+        try:
+            return bool(await self._run("ping", lambda client: client.ping()))
+        except StorageError:
+            return False
+
+
+class ClickHouseEventStorage(_ClickHouseConnection, EventStorage):
+    """Event storage backed by ClickHouse.
+
+    ``on_db_latency`` is an optional hook (operation name, seconds) used to
+    feed the ``observatory_db_latency_seconds`` metric without coupling the
+    storage layer to Prometheus.
+
+    This backend also owns schema bootstrap: :meth:`startup` applies pending
+    SQL migrations, so it must start before the registry/mission backends.
+    """
+
+    def __init__(
+        self,
+        settings: Settings,
+        on_db_latency: Callable[[str, float], None] | None = None,
+        migrations_dir: Path | None = None,
+    ) -> None:
+        super().__init__(settings, on_db_latency)
+        self._table = f"`{self._database}`.`events`"
+        self._migrations_table = f"`{self._database}`.`schema_migrations`"
+        self._migrations_dir = migrations_dir or DEFAULT_MIGRATIONS_DIR
 
     # ------------------------------------------------------------------ #
     # EventStorage interface
@@ -191,19 +281,10 @@ class ClickHouseEventStorage(EventStorage):
         return migrations
 
     async def shutdown(self) -> None:
-        """Close the client; never raises."""
-        client, self._client = self._client, None
-        if client is not None:
-            try:
-                await asyncio.to_thread(client.close)
-            except Exception:  # noqa: BLE001 - shutdown must not raise
-                pass
+        await self._close()
 
     async def ping(self) -> bool:
-        try:
-            return bool(await self._run("ping", lambda client: client.ping()))
-        except StorageError:
-            return False
+        return await self._ping()
 
     async def insert_event(self, event: Event) -> None:
         row = [
@@ -252,16 +333,205 @@ class ClickHouseEventStorage(EventStorage):
 
     @staticmethod
     def _row_to_event(row: tuple[Any, ...]) -> Event:
-        def as_utc(value: datetime) -> datetime:
-            return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
-
         event_id, collector_id, timestamp, event_type, payload, schema_version, received_at = row
         return Event(
             id=event_id if isinstance(event_id, UUID) else UUID(str(event_id)),
             collector_id=collector_id,
-            timestamp=as_utc(timestamp),
+            timestamp=_as_utc(timestamp),
             event_type=event_type,
             payload=json.loads(payload),
             schema_version=int(schema_version),
-            received_at=as_utc(received_at),
+            received_at=_as_utc(received_at),
+        )
+
+
+class ClickHouseRegistryStorage(_ClickHouseConnection, RegistryStorage):
+    """Fleet Registry storage on ``fleet_registry`` (ReplacingMergeTree).
+
+    Schema is created by migration ``0002_fleet_registry.sql``, applied by
+    :class:`ClickHouseEventStorage` at startup.
+    """
+
+    def __init__(
+        self,
+        settings: Settings,
+        on_db_latency: Callable[[str, float], None] | None = None,
+    ) -> None:
+        super().__init__(settings, on_db_latency)
+        self._table = f"`{self._database}`.`fleet_registry`"
+
+    async def startup(self) -> None:
+        if not await self._ping():
+            raise StorageError("ClickHouse unreachable for registry storage")
+
+    async def shutdown(self) -> None:
+        await self._close()
+
+    async def upsert_asset(self, asset: FleetAsset) -> None:
+        row = [
+            asset.fleet_id,
+            asset.nickname or "",
+            asset.hostname,
+            asset.role,
+            asset.location,
+            asset.platform,
+            asset.os,
+            asset.software_version or "",
+            list(asset.capabilities),
+            list(asset.tags),
+            asset.status.value,
+            asset.registered_at,
+            asset.updated_at,
+            _revision(),
+        ]
+        await self._run(
+            "registry_upsert",
+            lambda client: client.insert(
+                self._table, [row], column_names=list(_REGISTRY_COLUMNS)
+            ),
+        )
+
+    async def get_asset(self, fleet_id: str) -> FleetAsset | None:
+        query = (
+            f"SELECT {', '.join(_REGISTRY_COLUMNS)} FROM {self._table} FINAL "
+            "WHERE fleet_id = {fleet_id:String} LIMIT 1"
+        )
+        result = await self._run(
+            "registry_get",
+            lambda client: client.query(query, parameters={"fleet_id": fleet_id}),
+        )
+        rows = result.result_rows
+        return self._row_to_asset(rows[0]) if rows else None
+
+    async def list_assets(self) -> list[FleetAsset]:
+        query = (
+            f"SELECT {', '.join(_REGISTRY_COLUMNS)} FROM {self._table} FINAL "
+            "ORDER BY fleet_id"
+        )
+        result = await self._run("registry_list", lambda client: client.query(query))
+        return [self._row_to_asset(row) for row in result.result_rows]
+
+    @staticmethod
+    def _row_to_asset(row: tuple[Any, ...]) -> FleetAsset:
+        (
+            fleet_id,
+            nickname,
+            hostname,
+            role,
+            location,
+            platform,
+            os_name,
+            software_version,
+            capabilities,
+            tags,
+            status,
+            registered_at,
+            updated_at,
+            _rev,
+        ) = row
+        return FleetAsset(
+            fleet_id=fleet_id,
+            nickname=nickname or None,
+            hostname=hostname,
+            role=role,
+            location=location,
+            platform=platform,
+            os=os_name,
+            software_version=software_version or None,
+            capabilities=tuple(capabilities),
+            tags=tuple(tags),
+            status=LifecycleStatus(status),
+            registered_at=_as_utc(registered_at),
+            updated_at=_as_utc(updated_at),
+        )
+
+
+class ClickHouseMissionStorage(_ClickHouseConnection, MissionStorage):
+    """Mission projection storage on ``missions`` (ReplacingMergeTree).
+
+    Schema is created by migration ``0003_missions.sql``.
+    """
+
+    def __init__(
+        self,
+        settings: Settings,
+        on_db_latency: Callable[[str, float], None] | None = None,
+    ) -> None:
+        super().__init__(settings, on_db_latency)
+        self._table = f"`{self._database}`.`missions`"
+
+    async def startup(self) -> None:
+        if not await self._ping():
+            raise StorageError("ClickHouse unreachable for mission storage")
+
+    async def shutdown(self) -> None:
+        await self._close()
+
+    async def upsert_mission(self, record: MissionRecord) -> None:
+        row = [
+            record.mission_id,
+            record.title,
+            record.assigned_agent or "",
+            record.state,
+            record.created_at,
+            record.started_at,
+            record.completed_at,
+            record.pr_ref or "",
+            record.commit_sha or "",
+            record.updated_at,
+            _revision(),
+        ]
+        await self._run(
+            "mission_upsert",
+            lambda client: client.insert(
+                self._table, [row], column_names=list(_MISSION_COLUMNS)
+            ),
+        )
+
+    async def get_mission(self, mission_id: str) -> MissionRecord | None:
+        query = (
+            f"SELECT {', '.join(_MISSION_COLUMNS)} FROM {self._table} FINAL "
+            "WHERE mission_id = {mission_id:String} LIMIT 1"
+        )
+        result = await self._run(
+            "mission_get",
+            lambda client: client.query(query, parameters={"mission_id": mission_id}),
+        )
+        rows = result.result_rows
+        return self._row_to_mission(rows[0]) if rows else None
+
+    async def list_missions(self) -> list[MissionRecord]:
+        query = (
+            f"SELECT {', '.join(_MISSION_COLUMNS)} FROM {self._table} FINAL "
+            "ORDER BY mission_id"
+        )
+        result = await self._run("mission_list", lambda client: client.query(query))
+        return [self._row_to_mission(row) for row in result.result_rows]
+
+    @staticmethod
+    def _row_to_mission(row: tuple[Any, ...]) -> MissionRecord:
+        (
+            mission_id,
+            title,
+            assigned_agent,
+            state,
+            created_at,
+            started_at,
+            completed_at,
+            pr_ref,
+            commit_sha,
+            updated_at,
+            _rev,
+        ) = row
+        return MissionRecord(
+            mission_id=mission_id,
+            title=title,
+            assigned_agent=assigned_agent or None,
+            state=state,
+            created_at=_as_utc(created_at),
+            started_at=_as_utc(started_at),
+            completed_at=_as_utc(completed_at),
+            pr_ref=pr_ref or None,
+            commit_sha=commit_sha or None,
+            updated_at=_as_utc(updated_at),
         )
