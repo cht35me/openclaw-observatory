@@ -15,7 +15,13 @@ import time
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
-from app.api.deps import MissionStorageDep, RegistryServiceDep, SettingsDep, StorageDep
+from app.api.deps import (
+    InventoryStorageDep,
+    MissionStorageDep,
+    RegistryServiceDep,
+    SettingsDep,
+    StorageDep,
+)
 from app.services.monitor import build_snapshot, render_monitor_html
 
 router = APIRouter()
@@ -28,6 +34,7 @@ async def monitor(
     registry: RegistryServiceDep,
     missions: MissionStorageDep,
     storage: StorageDep,
+    inventories: InventoryStorageDep,
 ) -> HTMLResponse:
     """Render the Observatory instrument panel."""
     uptime = time.monotonic() - request.app.state.started_at_monotonic
@@ -36,6 +43,7 @@ async def monitor(
         registry=registry,
         missions=missions,
         events=storage,
+        inventories=inventories,
         uptime_seconds=uptime,
     )
     return HTMLResponse(render_monitor_html(snapshot))
