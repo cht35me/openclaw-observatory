@@ -48,8 +48,10 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
-#: Mission IDs per MISSION.md: ``M001``, ``M002``, … (padding is convention).
-MissionId = Annotated[str, Field(pattern=r"^M[0-9]{3,}$")]
+#: Mission IDs per MISSION.md: ``M001``, ``M002``, … (padding is convention),
+#: plus supervisor-introduced point releases such as ``M003.5`` (Phase 2.1).
+#: Point IDs are plain strings — no ordering semantics attach to the suffix.
+MissionId = Annotated[str, Field(pattern=r"^M[0-9]{3,}(\.[0-9]+)?$")]
 
 ShortText = Annotated[str, Field(max_length=256)]
 
