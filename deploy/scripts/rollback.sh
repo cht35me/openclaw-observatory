@@ -27,9 +27,9 @@ require_clean_tree
 
 CURRENT="$(current_commit)"
 log "rolling back: $CURRENT -> $TARGET"
-git -C "$OBS_REPO" rev-parse --verify --quiet "$TARGET^{commit}" >/dev/null \
+COMMIT=$(git -C "$OBS_REPO" rev-parse --verify --quiet "$TARGET^{commit}") \
   || die "unknown git ref: $TARGET"
-git -C "$OBS_REPO" checkout --quiet "$TARGET"
+git -C "$OBS_REPO" checkout --quiet --detach "$COMMIT"
 
 # Requirements may differ between releases; reinstall the pinned set.
 install_python_deps

@@ -29,10 +29,18 @@ if git -C "$OBS_REPO" remote get-url origin >/dev/null 2>&1; then
   log "fetching origin (with tags)"
   git -C "$OBS_REPO" fetch --tags origin
 fi
-git -C "$OBS_REPO" rev-parse --verify --quiet "$TARGET^{commit}" >/dev/null \
-  || die "unknown git ref: $TARGET"
-log "checking out $TARGET"
-git -C "$OBS_REPO" checkout --quiet "$TARGET"
+# Resolve remote-first so a branch name means its *fetched* head, not a
+# stale local branch left over from clone time; deploy detached, matching
+# how release tags are deployed.
+if COMMIT=$(git -C "$OBS_REPO" rev-parse --verify --quiet "origin/$TARGET^{commit}"); then
+  :
+elif COMMIT=$(git -C "$OBS_REPO" rev-parse --verify --quiet "$TARGET^{commit}"); then
+  :
+else
+  die "unknown git ref: $TARGET"
+fi
+log "checking out $TARGET ($COMMIT)"
+git -C "$OBS_REPO" checkout --quiet --detach "$COMMIT"
 
 install_python_deps
 
