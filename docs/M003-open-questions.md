@@ -162,7 +162,7 @@ operator-driven recovery jump, which is passed through untouched). A collector
 idempotent, legal, and audit-visible by design. Verified live: M003 entered
 the projection at `Running` with `"backfill": true` stored on the event.
 
-### 8. Monitor placement and exposure → SD-020 (Proposed)
+### 8. Monitor placement and exposure → SD-020 (Accepted at Gate G3 review)
 
 The Observatory Monitor is a server-rendered HTML page at `GET /monitor`
 *inside the backend* (stdlib rendering + `html.escape`, meta-refresh, no

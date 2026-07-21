@@ -11,8 +11,8 @@ supervisor a single place to answer: **what is the fleet doing, is it healthy, a
 anything need my attention?**
 
 The M001 foundation phase (documentation, architecture, governance) is complete:
-architecture and technology decisions **SD-001…SD-019** (approved/accepted) and
-**SD-020** (proposed under M003 PR 2) are recorded in
+architecture and technology decisions **SD-001…SD-020** (approved/accepted) are
+recorded in
 [docs/decisions/](docs/decisions/README.md). Mission **M002** delivered the first
 production code: the core backend skeleton in [backend/](backend/) — an authenticated,
 versioned ingestion API backed by ClickHouse, with health, metrics, and structured
@@ -147,7 +147,7 @@ This starts ClickHouse (internal-only; no host port) and the backend on
 | --- | --- | --- |
 | `GET /health` | none ([SD-013](docs/decisions/SD-013-health-endpoint-unauthenticated.md)) | Status (`ok`/`degraded`), version, uptime, DB connectivity. Always HTTP 200; a DB outage flips `status` to `degraded` (a liveness probe must not restart a healthy API process). |
 | `GET /metrics` | none, internal-only ([SD-014](docs/decisions/SD-014-metrics-endpoint-unauthenticated.md)) | Prometheus metrics: request count/latency, ingestion successes/failures, DB latency, fleet gauges, heartbeat latency, offline transitions. Protected by network boundaries (firewall/reverse proxy/tailnet), never exposed publicly. |
-| `GET /monitor` | none, internal-only ([SD-020](docs/decisions/SD-020-server-rendered-monitor-in-backend.md), proposed) | **Observatory Monitor** — server-rendered HTML instrument panel: OpenClaw agent health, mission progress, host CPU/RAM/storage, Docker containers, fleet & service health. Stdlib rendering, meta-refresh, no JS/build toolchain; loopback/tailnet exposure only. |
+| `GET /monitor` | none, internal-only ([SD-020](docs/decisions/SD-020-server-rendered-monitor-in-backend.md)) | **Observatory Monitor** — server-rendered HTML instrument panel: OpenClaw agent health, mission progress, host CPU/RAM/storage, Docker containers, fleet & service health. Stdlib rendering, meta-refresh, no JS/build toolchain; loopback/tailnet exposure only. |
 | `POST /api/v1/events` | `X-API-Key` | Ingest one telemetry event (strictly validated JSON). Returns `202` with the assigned event UUID. Each key is bound to one collector identity ([SD-017](docs/decisions/SD-017-api-key-bound-to-fleet-identity.md)); submitting another `collector_id` returns `403`. Event types with server-side semantics (`heartbeat`, `mission_update`) are validated against their payload schemas and drive projections. |
 | `GET /api/v1/fleet` | `X-API-Key` | List all Fleet Registry assets with derived connectivity, last heartbeat, and computed health score (read-only). |
 | `GET /api/v1/fleet/{id}` | `X-API-Key` | One registry asset by Fleet ID, or `404`. |

@@ -6,7 +6,7 @@ CPU/RAM/storage, Docker status, and every registered fleet asset with its
 computed health — all read from the backend's own registry, mission
 projection, and event stream.
 
-Design (SD-020, proposed):
+Design (SD-020, accepted at Gate G3 review):
 
 * **Server-rendered HTML from inside the backend** — no React/SPA/build
   toolchain (explicitly out of scope for M003). The backend already owns the

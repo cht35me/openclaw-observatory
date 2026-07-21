@@ -26,4 +26,4 @@ a new decision that supersedes it.
 | [SD-017](SD-017-api-key-bound-to-fleet-identity.md) | API key bound to exactly one Fleet identity | Approved |
 | [SD-018](SD-018-clickhouse-versioned-row-state.md) | Mutable registry/mission state as versioned rows in ClickHouse | Accepted |
 | [SD-019](SD-019-stdlib-only-collectors.md) | Collectors are standard-library-only Python | Accepted |
-| [SD-020](SD-020-server-rendered-monitor-in-backend.md) | Observatory Monitor: server-rendered page inside the backend | Proposed |
+| [SD-020](SD-020-server-rendered-monitor-in-backend.md) | Observatory Monitor: server-rendered page inside the backend | Accepted |

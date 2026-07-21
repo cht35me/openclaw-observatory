@@ -1,6 +1,6 @@
 # SD-020 — Observatory Monitor: Server-Rendered Page Inside the Backend
 
-- **Status:** Proposed
+- **Status:** Accepted (supervisor, Gate G3 review, 2026-07-21)
 - **Date:** 2026-07-21
 - **Proposed by:** A001-OC01-RPSG01 (Mission M003, PR 2)
 - **Context:** M003 folds the Observatory Monitor into scope (supervisor
