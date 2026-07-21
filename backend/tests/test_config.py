@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
-from app.config import Settings
+from app.config import ConfigurationError, Settings, load_settings
 from app.models.registry import Environment
 
 
@@ -96,3 +98,95 @@ def test_deployment_environment_default_and_parsing() -> None:
 
     with pytest.raises(ValueError):
         Settings(_env_file=None, deployment_environment="prod")  # exact values only
+
+
+# --- Fail-fast startup validation (M003.5 §2) --------------------------------
+
+
+def _valid_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Minimal valid environment for load_settings(), isolated from the host."""
+    prefixes = (
+        "CLICKHOUSE_",
+        "API_KEYS",
+        "LOG_LEVEL",
+        "APP_",
+        "HEARTBEAT_",
+        "OFFLINE_",
+        "DEPLOYMENT_",
+    )
+    for name in list(os.environ):
+        if name.startswith(prefixes):
+            monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("API_KEYS", "RPSG01:test-key")
+
+
+def test_startup_problems_empty_for_valid_settings() -> None:
+    assert _settings("RPSG01:key-a").startup_problems() == []
+
+
+def test_startup_problems_empty_api_keys() -> None:
+    problems = _settings("").startup_problems()
+    assert any("API_KEYS is required" in p for p in problems)
+
+
+def test_startup_problems_placeholder_api_key() -> None:
+    """An unedited example env file must not reach serving state."""
+    problems = _settings("RPSG01:change-me-host-collector-key").startup_problems()
+    assert any("placeholder" in p for p in problems)
+
+
+def test_startup_problems_invalid_log_level() -> None:
+    settings = Settings(_env_file=None, api_keys="RPSG01:k", log_level="LOUD")
+    assert any("LOG_LEVEL" in p for p in settings.startup_problems())
+
+
+def test_startup_problems_offline_timeout_vs_heartbeat() -> None:
+    settings = Settings(
+        _env_file=None, api_keys="RPSG01:k", offline_timeout=30.0, heartbeat_interval=30.0
+    )
+    assert any("OFFLINE_TIMEOUT" in p for p in settings.startup_problems())
+
+
+def test_load_settings_valid_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    _valid_env(monkeypatch)
+    settings = load_settings()
+    assert settings.api_key_bindings == (("RPSG01", "test-key"),)
+
+
+def test_load_settings_fails_fast_on_missing_api_keys(monkeypatch: pytest.MonkeyPatch) -> None:
+    _valid_env(monkeypatch)
+    monkeypatch.delenv("API_KEYS", raising=False)
+    with pytest.raises(ConfigurationError, match="API_KEYS is required"):
+        load_settings()
+
+
+def test_load_settings_fails_fast_on_bad_field_type(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pydantic field errors surface as env-var-named messages, no traceback."""
+    _valid_env(monkeypatch)
+    monkeypatch.setenv("CLICKHOUSE_PORT", "not-a-port")
+    with pytest.raises(ConfigurationError, match="CLICKHOUSE_PORT"):
+        load_settings()
+
+
+def test_load_settings_error_never_leaks_secret_values(monkeypatch: pytest.MonkeyPatch) -> None:
+    _valid_env(monkeypatch)
+    monkeypatch.setenv("API_KEYS", "RPSG01:super-secret,RPSG01:")
+    with pytest.raises(ConfigurationError) as excinfo:
+        load_settings()
+    assert "super-secret" not in str(excinfo.value)
+
+
+def test_build_app_exits_with_clear_error(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The uvicorn factory dies with status 2 before binding (M003.5 §2)."""
+    from app.main import build_app
+
+    _valid_env(monkeypatch)
+    monkeypatch.delenv("API_KEYS", raising=False)
+    with pytest.raises(SystemExit) as excinfo:
+        build_app()
+    assert excinfo.value.code == 2
+    err = capsys.readouterr().err
+    assert "observatory-backend" in err
+    assert "API_KEYS" in err

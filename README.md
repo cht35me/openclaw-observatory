@@ -225,6 +225,14 @@ the repository carries placeholder examples only
 Installation steps as executed: [collectors/README.md](collectors/README.md#deployment-on-rpsg01-as-executed-m003-pr-2).
 The monitor is then live at `http://127.0.0.1:8000/monitor`.
 
+Lifecycle operations are scripted (Phase 2.1, M003.5 §2): install, upgrade,
+rollback, and uninstall live in [deploy/scripts/](deploy/scripts/) with the
+runbook in [deploy/README.md](deploy/README.md). Backend and collectors
+validate their configuration **before** serving and fail fast with a clear
+error on missing/invalid values; the scripts run the same validation before
+any restart. Reboot-recovery expectations:
+[docs/deployment.md §12](docs/deployment.md#12-rpsg01-native-deployment-package-phase-21).
+
 ### Local development and tests
 
 ```bash
@@ -270,7 +278,8 @@ reachable (e.g. via `docker compose up clickhouse`).
 │   ├── observatory_collectors/ # host_pi + openclaw_agent packages
 │   ├── systemd/                # Collector systemd user units
 │   └── tests/                  # Offline collector suite (fixture-driven)
-├── deploy/                     # Native RPSG01 deployment (units + example env)
+├── deploy/                     # Native RPSG01 deployment (units, example env,
+│                               #   install/upgrade/rollback/uninstall scripts)
 └── docs/
     ├── vision.md               # Mission Control vision
     ├── requirements.md         # Functional and non-functional requirements

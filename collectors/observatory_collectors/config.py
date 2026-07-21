@@ -17,6 +17,11 @@ class ConfigError(Exception):
     """Raised when required configuration is missing or invalid."""
 
 
+#: Placeholder marker used by committed ``*.example`` files; a live config
+#: that still carries it was never edited, so fail fast (M003.5 §2).
+PLACEHOLDER_MARKER = "change-me"
+
+
 def _float_env(env: dict[str, str], name: str, default: float) -> float:
     raw = env.get(name, "").strip()
     if not raw:
@@ -64,6 +69,11 @@ class CollectorConfig:
                 raise ConfigError(f"cannot read OBSERVATORY_API_KEY_FILE {key_file!r}") from exc
         if not api_key:
             raise ConfigError("OBSERVATORY_API_KEY (or OBSERVATORY_API_KEY_FILE) is required")
+        if PLACEHOLDER_MARKER in api_key:
+            raise ConfigError(
+                "OBSERVATORY_API_KEY still holds the placeholder from config.example.env; "
+                "set the real key issued for this collector (docs/security.md §5)"
+            )
 
         fleet_id = env.get("FLEET_ID", "").strip()
         if not fleet_id:

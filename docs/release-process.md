@@ -53,13 +53,21 @@ same change, or merges will deadlock on a phantom context.
 
 ## 4. Deployment Checklist (RPSG01 native units; VPS compose at Phase 4)
 
+Scripted since Phase 2.1: **`deploy/scripts/upgrade.sh <tag>`** performs the
+steps below (with config validation before any restart and a recorded
+rollback target); see [deploy/README.md](../deploy/README.md). Manually:
+
 - [ ] Record the currently deployed tag/commit (`/monitor` header or
-      `git -C <deploy checkout> rev-parse HEAD`) — this is the rollback target.
+      `git -C <deploy checkout> rev-parse HEAD`) — this is the rollback target
+      (the script records it in `~/.config/observatory/deploy-state`).
+- [ ] Apply configuration changes (untracked `~/.config/observatory/*.env`);
+      set `APP_VERSION` to the tag (§6) **before** upgrading.
 - [ ] Fetch and check out the release tag in the deployment checkout.
 - [ ] Dependencies: `backend/.venv/bin/pip install -r backend/requirements.txt`
       (pinned; dev extras are not installed on deployment hosts).
-- [ ] Apply configuration changes (untracked `~/.config/observatory/*.env`);
-      set `APP_VERSION` to the tag (§6).
+- [ ] Validate configuration against the new release *before* restarting
+      (`validate_all_config` in the scripts; the services also fail fast on
+      their own — [deployment.md](deployment.md) §12).
 - [ ] Restart units: `systemctl --user restart observatory-backend` (ClickHouse
       and collectors only when their artifacts changed).
 - [ ] Verify: `/health` returns `ok`, `/monitor` header shows the expected
@@ -67,6 +75,9 @@ same change, or merges will deadlock on a phantom context.
       `journalctl --user -u observatory-backend -n 50`.
 
 ## 5. Rollback Checklist
+
+Scripted since Phase 2.1: **`deploy/scripts/rollback.sh [tag]`** (defaults to
+the recorded previous deployment). Manually:
 
 - [ ] Check out the previous release tag (recorded in §4, step 1).
 - [ ] Reinstall pinned requirements if they differed between tags.
@@ -83,6 +94,7 @@ same change, or merges will deadlock on a phantom context.
 
 - Tags are semver-ish **`v0.x.y`** annotated tags on `main`, created after merge:
   `git tag -a v0.2.0 -m "M003.5: CI + release discipline" && git push origin v0.2.0`.
+  First release so tagged: **`v0.2.0`** (M003.5 PR 1 + PR 2 merge commit).
 - **Minor** (`v0.x.0`): each merged mission/PR batch that changes behavior.
   **Patch** (`v0.x.y`): fixes to an already-tagged release. `v1.0.0` is deferred
   until the Phase 4 production deployment.

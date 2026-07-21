@@ -188,6 +188,17 @@ def _dash(value: Any) -> str:
     return _esc(value) if value not in (None, "") else "—"
 
 
+def _version_label(version: Any) -> str:
+    """``v0.2.0`` stays ``v0.2.0``; bare ``0.1.0`` becomes ``v0.1.0``.
+
+    Release tags already carry the ``v`` prefix (release-process.md §6) and
+    the deployed APP_VERSION equals the tag, so blindly prepending ``v``
+    rendered ``vv0.2.0`` in the header (found during PR 3 live verification).
+    """
+    text = str(version)
+    return text if text.startswith("v") else f"v{text}"
+
+
 def _fmt_percent(value: Any) -> str:
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         return f"{value:.1f}%"
@@ -516,7 +527,7 @@ def _event_detail(event: Event) -> str:
     if event.event_type == SERVICE_START_EVENT_TYPE:
         commit = payload.get("git_commit")
         commit_text = str(commit)[:12] if commit else "unknown"
-        return _esc(f"v{payload.get('version', '?')} · commit {commit_text}")
+        return _esc(f"{_version_label(str(payload.get('version', '?')))} · commit {commit_text}")
     return _esc(str(payload)[:120])  # pragma: no cover - defensive default
 
 
@@ -700,7 +711,7 @@ def _collector_versions_label(snapshot: MonitorSnapshot) -> str:
     header line.
     """
     parts = [
-        f"{_esc(a.fleet_id)} v{_esc(a.last_heartbeat.collector_version)}"
+        f"{_esc(a.fleet_id)} {_esc(_version_label(a.last_heartbeat.collector_version))}"
         for a in snapshot.assets
         if a.fleet_id != snapshot.backend_fleet_id
         and a.last_heartbeat is not None
@@ -728,7 +739,7 @@ def render_monitor_html(snapshot: MonitorSnapshot) -> str:
         # front so troubleshooting starts from exactly which software is
         # running on this host.
         f'<p class="meta">{_esc(snapshot.backend_fleet_id)} '
-        f"v{_esc(snapshot.backend_version)} · commit {commit} · "
+        f"{_esc(_version_label(snapshot.backend_version))} · commit {commit} · "
         f"built {built} · env {_esc(snapshot.deployment_environment)} · "
         f"mission {_active_mission_label(snapshot)} · "
         f"collectors {_collector_versions_label(snapshot)} · "

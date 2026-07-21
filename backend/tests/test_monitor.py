@@ -548,3 +548,11 @@ def test_monitor_route_reflects_ingested_telemetry(client: TestClient) -> None:
 
 def test_monitor_is_read_only(client: TestClient) -> None:
     assert client.post("/monitor").status_code == 405
+
+
+def test_version_label_no_double_v_prefix() -> None:
+    """APP_VERSION equals the release tag (v0.2.0); header must not show vv0.2.0."""
+    from app.services.monitor import _version_label
+
+    assert _version_label("v0.2.0") == "v0.2.0"
+    assert _version_label("0.1.0") == "v0.1.0"

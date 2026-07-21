@@ -33,10 +33,11 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import sys
 from typing import Any
 
 from observatory_collectors.client import ObservatoryClient
-from observatory_collectors.config import CollectorConfig
+from observatory_collectors.config import CollectorConfig, ConfigError
 from observatory_collectors.openclaw_agent import probes
 from observatory_collectors.runner import CollectorRunner, EventTuple, Task
 
@@ -139,7 +140,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    config = CollectorConfig.from_env(default_collector_name="openclaw-agent")
+    try:
+        # Fail fast, before any collection starts (M003.5 §2): a clear
+        # one-line error beats a traceback in the journal.
+        config = CollectorConfig.from_env(default_collector_name="openclaw-agent")
+    except ConfigError as exc:
+        print(f"observatory-agent-collector: configuration error: {exc}", file=sys.stderr)
+        return 2
     runner = build_runner(config)
     if args.once:
         submitted = runner.run_once()

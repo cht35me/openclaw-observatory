@@ -7,7 +7,11 @@ plus ClickHouse storage per SD-005).
 
 Run locally::
 
-    uvicorn app.main:app --host 127.0.0.1 --port 8000
+    uvicorn --factory app.main:build_app --host 127.0.0.1 --port 8000
+
+The factory validates configuration *before* the server binds its port
+(M003.5 §2): a missing or invalid environment exits non-zero with a clear
+message instead of serving requests it cannot authenticate or store.
 """
 
 from __future__ import annotations
@@ -15,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import sys
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -29,7 +34,7 @@ from app.api.monitor import router as monitor_router
 from app.api.prometheus import router as prometheus_router
 from app.api.v1 import routers as v1_routers
 from app.auth import ApiKeyAuthenticator
-from app.config import Settings, load_settings
+from app.config import ConfigurationError, Settings, load_settings
 from app.logging import configure_logging
 from app.metrics import AppMetrics
 from app.middleware import RequestContextMiddleware, RequestSizeLimitMiddleware
@@ -192,5 +197,16 @@ def create_app(
     return app
 
 
-#: ASGI application for uvicorn (``uvicorn app.main:app``).
-app = create_app()
+def build_app() -> FastAPI:
+    """Production entry point: ``uvicorn --factory app.main:build_app``.
+
+    Fail-fast configuration validation (M003.5 §2): a misconfigured
+    deployment prints one clear, secret-free error and exits with status 2
+    before uvicorn binds the listen socket. The systemd unit
+    (deploy/systemd/observatory-backend.service) uses this factory.
+    """
+    try:
+        return create_app()
+    except ConfigurationError as exc:
+        print(f"observatory-backend: {exc}", file=sys.stderr)
+        raise SystemExit(2) from None

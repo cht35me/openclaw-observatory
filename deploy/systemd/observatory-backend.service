@@ -1,6 +1,8 @@
 # OpenClaw Observatory backend (OBLN01) — systemd *user* unit.
 #
-# Install on the deployment host:
+# Install on the deployment host (scripted; see deploy/README.md):
+#   deploy/scripts/install.sh          # copies units, seeds config, enables linger
+# or manually:
 #   mkdir -p ~/.config/systemd/user ~/.config/observatory
 #   cp deploy/systemd/observatory-backend.service ~/.config/systemd/user/
 #   cp deploy/backend.example.env ~/.config/observatory/backend.env   (edit values!)
@@ -22,7 +24,9 @@ Type=simple
 # Real values (API_KEYS!) live in the untracked env file, never in this unit.
 EnvironmentFile=%h/.config/observatory/backend.env
 WorkingDirectory=%h/projects/openclaw-observatory/backend
-ExecStart=%h/projects/openclaw-observatory/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+# --factory: build_app() validates the environment BEFORE binding the port
+# (M003.5 §2) — bad config exits with a clear error instead of serving.
+ExecStart=%h/projects/openclaw-observatory/backend/.venv/bin/uvicorn --factory app.main:build_app --host 127.0.0.1 --port 8000
 Restart=on-failure
 RestartSec=5
 
