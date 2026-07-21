@@ -6,9 +6,9 @@ Every implementation phase is delivered as one or more missions
 ([MISSION.md](../MISSION.md)) with small, reviewable Pull Requests.
 
 ```text
-Phase 0 ──▶ Gate G1 ──▶ Phase 1 ──▶ Phase 2 ──▶ Phase 2.1 ──▶ Phase 3 ──▶ Phase 4 ──▶ ...
-(M001)     (arch          core       collectors   hardening     visibility   deploy
-            approval)     backend    + registry   + ops ready   + frontend
+Phase 0 ──▶ Gate G1 ──▶ Phase 1 ──▶ Phase 2 ──▶ Phase 2.1 ──▶ Phase 2.2 ──▶ Phase 3 ──▶ ...
+(M001)     (arch          core       collectors   hardening     operational   visibility
+            approval)     backend    + registry   + ops ready   polish        + frontend
 ```
 
 ## Phase 0 — Documentation and Governance Foundation (M001) ✔ this mission
@@ -94,6 +94,30 @@ validated; registry exposes complete hardware/OS identity; storage inventory sup
 multiple devices; maintenance status visible; monitor refresh completes within one
 second under normal operation; documentation complete; PRs merged.
 
+## Phase 2.2 — Operational Polish & Runtime Corrections (M003.6)
+
+Supervisor-added maintenance milestone (2026-07-22): close the operational gaps
+found during the M003.5 production validation before Phase 3 begins. Canonical
+specification: mission document M003.6 (supervisor mission directory); findings
+recorded in [M003.6-notes.md](M003.6-notes.md).
+
+1. **Claude Code detection** — configurable probe executable paths
+   (`CLAUDE_BIN`, `OPENCLAW_BIN`) with PATH fallback; runtime version reports
+   the Node.js actually running OpenClaw, not the system node.
+2. **Persistent journald** — least-privilege persistent-journal host
+   prerequisite documented ([deployment.md](deployment.md) §12), install-time
+   readability warning, reboot-checklist journal step.
+3. **Timezone rendering** — `DISPLAY_TZ` backend setting; "Last reboot" (and
+   day boundaries) rendered in the display timezone with explicit offset;
+   internal timestamps stay UTC.
+4. **Documentation** — OpenClaw runtime dropped-systemEvent issue recorded as
+   an external dependency with operational mitigations (no Observatory code).
+
+**Dependencies:** Phase 2.1 (Gate G3.5).
+**Gate:** acceptance criteria of M003.6 met (correct detection and versions on
+the live monitor, timezone rendering verified, documentation merged, CI green,
+no M003.5 regression).
+
 ## Phase 3 — Engineering and Cost Visibility + Initial Frontend
 
 1. **GitHub integration** (poller: repos, branches, latest commit, active PRs, review
@@ -105,7 +129,8 @@ second under normal operation; documentation complete; PRs merged.
    minimal feature set and grow, but on the SPA stack from the start).
 4. **Dashboard authentication** (supervisor login).
 
-**Dependencies:** Phase 2.1 (registry + mission data to display, hardened platform).
+**Dependencies:** Phase 2.2 (registry + mission data to display, hardened and
+polished platform).
 **Gate:** supervisor can answer "what is the fleet doing right now?" from the dashboard
 alone.
 
