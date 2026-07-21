@@ -122,6 +122,7 @@ class RegistryService:
             capabilities=asset.capabilities,
             tags=asset.tags,
             status=asset.status,
+            environment=asset.environment,
             registered_at=asset.registered_at,
             updated_at=asset.updated_at,
             last_heartbeat=heartbeat,

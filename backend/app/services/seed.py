@@ -31,7 +31,13 @@ import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
 
-from app.models.registry import AssetType, DeploymentRole, FleetAsset, LifecycleStatus
+from app.models.registry import (
+    AssetType,
+    DeploymentRole,
+    Environment,
+    FleetAsset,
+    LifecycleStatus,
+)
 from app.storage.base import RegistryStorage
 
 _logger = logging.getLogger("observatory.registry")
@@ -52,6 +58,7 @@ SEED_ASSETS: tuple[dict, ...] = (
         "capabilities": ("telemetry", "heartbeat", "docker"),
         "tags": ("production", "singapore", "edge"),
         "status": LifecycleStatus.ACTIVE,
+        "environment": Environment.PRODUCTION,
     },
     {
         "fleet_id": "A001",
@@ -67,6 +74,7 @@ SEED_ASSETS: tuple[dict, ...] = (
         "capabilities": ("telemetry", "heartbeat", "missions"),
         "tags": ("production", "singapore", "agent"),
         "status": LifecycleStatus.ACTIVE,
+        "environment": Environment.PRODUCTION,
     },
     {
         "fleet_id": "OBLN01",  # Observatory Local Node deployment 01 (FLEET.md)
@@ -84,6 +92,7 @@ SEED_ASSETS: tuple[dict, ...] = (
         "capabilities": ("ingestion", "registry", "missions", "heartbeat", "metrics"),
         "tags": ("production", "singapore", "critical"),
         "status": LifecycleStatus.ACTIVE,
+        "environment": Environment.PRODUCTION,
     },
 )
 

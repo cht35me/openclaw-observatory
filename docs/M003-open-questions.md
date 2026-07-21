@@ -211,6 +211,10 @@ The placeholder is removed when the runtime-maintained field exists; the
 monitor and backend need no structural change (the `agent_status` payload is
 schema-flexible).
 
+**M003.5 update:** this ruling is now elaborated as the specification of
+record in [token-usage-architecture.md](token-usage-architecture.md)
+(M003.5 §5); the monitor placeholder points there.
+
 ### 10. RPSG01 deployment specifics (real installation, supervisor-authorized)
 
 - **ClickHouse runs natively** under a systemd *user* unit

@@ -17,6 +17,7 @@ from app.config import Settings
 from app.main import create_app
 from app.storage.memory import (
     InMemoryEventStorage,
+    InMemoryHostInventoryStorage,
     InMemoryMissionStorage,
     InMemoryRegistryStorage,
 )
@@ -84,11 +85,18 @@ def mission_storage() -> InMemoryMissionStorage:
 
 
 @pytest.fixture
+def inventory_storage() -> InMemoryHostInventoryStorage:
+    """Fresh in-memory Host Inventory projection backend per test."""
+    return InMemoryHostInventoryStorage()
+
+
+@pytest.fixture
 def client(
     settings: Settings,
     storage: InMemoryEventStorage,
     registry_storage: InMemoryRegistryStorage,
     mission_storage: InMemoryMissionStorage,
+    inventory_storage: InMemoryHostInventoryStorage,
 ) -> Iterator[TestClient]:
     """HTTP client against a fully wired app (lifespan running).
 
@@ -100,6 +108,7 @@ def client(
         storage=storage,
         registry_storage=registry_storage,
         mission_storage=mission_storage,
+        inventory_storage=inventory_storage,
     )
     with TestClient(app) as test_client:
         yield test_client

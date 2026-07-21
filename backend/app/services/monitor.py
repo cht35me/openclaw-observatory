@@ -29,15 +29,19 @@ from __future__ import annotations
 
 import html
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from app.config import Settings
+from app.models.event import Event
 from app.models.mission import MissionRecord
 from app.models.registry import AssetType, Connectivity, FleetAssetView, HealthStatus
+from app.services.offline import OFFLINE_EVENT_TYPE, ONLINE_EVENT_TYPE
+from app.services.pipeline import MISSION_UPDATE_EVENT_TYPE
 from app.services.registry import SYSTEM_METRICS_EVENT_TYPE, RegistryService
-from app.storage.base import EventStorage, MissionStorage
-from app.version import GIT_COMMIT
+from app.services.startup_event import SERVICE_START_EVENT_TYPE
+from app.storage.base import EventStorage, HostInventoryStorage, MissionStorage
+from app.version import BUILD_TIMESTAMP, GIT_COMMIT
 
 #: Event types consumed by the monitor beyond the registry read-model.
 DOCKER_STATUS_EVENT_TYPE = "docker_status"
@@ -45,6 +49,22 @@ AGENT_STATUS_EVENT_TYPE = "agent_status"
 
 #: Page auto-refresh interval (seconds) — meta refresh, no JavaScript.
 REFRESH_SECONDS = 10
+
+#: Recent Events cap (M003.5 §4) — one bounded query, keeps the page fast.
+RECENT_EVENTS_LIMIT = 20
+
+#: Event types shown in Recent Events. Heartbeats are deliberately
+#: EXCLUDED (judgment call, docs/M003.5-notes.md): at a 30-second cadence
+#: they would fill all 20 slots within minutes and drown every actually
+#: notable event; heartbeat *absence* is already surfaced as offline/online
+#: transitions. Collector failures likewise arrive as heartbeat counters
+#: (no discrete event exists), visible through the health score instead.
+NOTABLE_EVENT_TYPES: tuple[str, ...] = (
+    SERVICE_START_EVENT_TYPE,
+    OFFLINE_EVENT_TYPE,
+    ONLINE_EVENT_TYPE,
+    MISSION_UPDATE_EVENT_TYPE,
+)
 
 
 @dataclass(frozen=True)
@@ -59,15 +79,23 @@ class MonitorSnapshot:
     #: Git commit of the running checkout (deployment traceability,
     #: supervisor review PR 2); ``None`` renders as ``unknown``.
     git_commit: str | None = None
+    #: Build timestamp (M003.5 §6): committer timestamp of the deployed
+    #: commit, or the BUILD_TIMESTAMP override; ``None`` renders ``unknown``.
+    build_timestamp: str | None = None
+    #: Deployment environment classification (M003.5 §3e/§6).
+    deployment_environment: str = "Development"
     assets: list[FleetAssetView] = field(default_factory=list)
     missions: list[MissionRecord] = field(default_factory=list)
     host_fleet_id: str | None = None
     host_metrics: dict[str, Any] | None = None
     host_metrics_at: datetime | None = None
+    host_inventory: dict[str, Any] | None = None
+    host_inventory_at: datetime | None = None
     docker: dict[str, Any] | None = None
     agent_fleet_id: str | None = None
     agent_status: dict[str, Any] | None = None
     agent_status_at: datetime | None = None
+    recent_events: list[Event] = field(default_factory=list)
 
 
 async def build_snapshot(
@@ -75,10 +103,16 @@ async def build_snapshot(
     registry: RegistryService,
     missions: MissionStorage,
     events: EventStorage,
+    inventories: HostInventoryStorage,
     uptime_seconds: float,
     now: datetime | None = None,
 ) -> MonitorSnapshot:
-    """Gather one read-model snapshot for the page (no writes, ever)."""
+    """Gather one read-model snapshot for the page (no writes, ever).
+
+    Performance gate G3.5 (refresh < 1 s): every read here is bounded —
+    latest-row reads (registry FINAL, newest event per type) plus one
+    LIMIT-20 recent-events query.
+    """
     now = now or datetime.now(UTC)
     assets = await registry.list_views()
     mission_records = await missions.list_missions()
@@ -93,6 +127,7 @@ async def build_snapshot(
     agent_id = next((a.fleet_id for a in assets if a.asset_type is AssetType.AGENT), None)
 
     host_metrics = host_metrics_at = docker = None
+    host_inventory = host_inventory_at = None
     if host_id is not None:
         metrics_event = await events.latest_event(host_id, SYSTEM_METRICS_EVENT_TYPE)
         if metrics_event is not None:
@@ -101,6 +136,12 @@ async def build_snapshot(
         docker_event = await events.latest_event(host_id, DOCKER_STATUS_EVENT_TYPE)
         if docker_event is not None:
             docker = docker_event.payload
+        inventory_record = await inventories.get_inventory(host_id)
+        if inventory_record is not None:
+            host_inventory = inventory_record.payload
+            host_inventory_at = inventory_record.reported_at
+
+    recent = await events.query_events(event_types=NOTABLE_EVENT_TYPES, limit=RECENT_EVENTS_LIMIT)
 
     agent_status = agent_status_at = None
     if agent_id is not None:
@@ -116,15 +157,20 @@ async def build_snapshot(
         backend_uptime_seconds=uptime_seconds,
         database_connected=db_connected,
         git_commit=GIT_COMMIT,
+        build_timestamp=BUILD_TIMESTAMP,
+        deployment_environment=settings.deployment_environment.value,
         assets=assets,
         missions=mission_records,
         host_fleet_id=host_id,
         host_metrics=host_metrics,
         host_metrics_at=host_metrics_at,
+        host_inventory=host_inventory,
+        host_inventory_at=host_inventory_at,
         docker=docker,
         agent_fleet_id=agent_id,
         agent_status=agent_status,
         agent_status_at=agent_status_at,
+        recent_events=recent,
     )
 
 
@@ -184,6 +230,48 @@ def _fmt_age(timestamp: datetime | None, now: datetime) -> str:
     return f"{_fmt_duration(age)} ago"
 
 
+def _fmt_used(used_bytes: Any, used_percent: Any) -> str:
+    """Actual usage + percentage, e.g. ``6.2 GiB (28.0%)`` (M003.5 monitor)."""
+    if used_bytes is None and used_percent is None:
+        return "—"
+    return f"{_fmt_bytes(used_bytes)} ({_fmt_percent(used_percent)})"
+
+
+def _fmt_installed_memory(total_bytes: Any) -> str:
+    """Installed memory as marketed capacity (§3a example: ``4 GB``).
+
+    Physical RAM minus firmware reservations is what ``MemTotal`` reports;
+    rounding to the nearest decimal GB recovers the module size.
+    """
+    if not isinstance(total_bytes, (int, float)) or isinstance(total_bytes, bool):
+        return "—"
+    gigabytes = total_bytes / 1_000_000_000
+    if gigabytes >= 1:
+        return f"{round(gigabytes)} GB"
+    return _fmt_bytes(total_bytes)
+
+
+def _fmt_last_reboot(uptime_seconds: Any, now: datetime) -> str:
+    """Humanized boot moment (§3-monitor): ``Today/Yesterday HH:MM`` or
+    ``N days ago``, derived from uptime. Timestamps are UTC (matching the
+    page's ``generated`` stamp)."""
+    if not isinstance(uptime_seconds, (int, float)) or isinstance(uptime_seconds, bool):
+        return "—"
+    booted = now - timedelta(seconds=float(uptime_seconds))
+    days = (now.date() - booted.date()).days
+    if days <= 0:
+        return f"Today {booted.strftime('%H:%M')}"
+    if days == 1:
+        return f"Yesterday {booted.strftime('%H:%M')}"
+    return f"{days} days ago"
+
+
+def _fmt_epoch_age(epoch: Any, now: datetime) -> str:
+    if not isinstance(epoch, (int, float)) or isinstance(epoch, bool):
+        return "—"
+    return _fmt_age(datetime.fromtimestamp(float(epoch), tz=UTC), now)
+
+
 _STATUS_CLASSES = {
     HealthStatus.HEALTHY: "ok",
     HealthStatus.WARNING: "warn",
@@ -237,11 +325,15 @@ def _render_agent_section(snapshot: MonitorSnapshot) -> str:
         ("Process uptime", _fmt_duration(status.get("process_uptime_seconds"))),
         ("Last completed task", _dash(status.get("last_completed_task"))),
         ("Reported", _fmt_age(snapshot.agent_status_at, snapshot.generated_at)),
-        # Token usage placeholder. Intended future ownership (Gate G3 review
-        # ruling, docs/M003-open-questions.md §9): the OpenClaw runtime
-        # exposes usage in the agent state file, the existing agent collector
-        # reports it; Claude API accounting stays a central-side cross-check.
-        ("Token usage", '<span class="muted">n/a — not yet collected</span>'),
+        # Token usage: architecture ruled and documented (M003.5 §5,
+        # docs/token-usage-architecture.md) — the OpenClaw runtime owns the
+        # numbers, the agent collector transports them as an agent_status
+        # field, Claude API accounting stays a central-side cross-check.
+        (
+            "Token usage",
+            '<span class="muted">n/a — runtime-owned, agent collector transport '
+            "(docs/token-usage-architecture.md)</span>",
+        ),
     ]
     body = "".join(f"<tr><th>{_esc(label)}</th><td>{value}</td></tr>" for label, value in rows)
     return f'<section><h2>OpenClaw Agent</h2><table class="kv">{body}</table></section>'
@@ -270,11 +362,191 @@ def _render_missions_section(snapshot: MonitorSnapshot) -> str:
     )
 
 
+def _render_system_section(snapshot: MonitorSnapshot) -> str:
+    """System summary (M003.5 §3-monitor): hardware + OS identity, uptime."""
+    inventory = snapshot.host_inventory or {}
+    hardware = inventory.get("hardware") or {}
+    os_info = inventory.get("os") or {}
+    maintenance = inventory.get("maintenance") or {}
+    metrics = snapshot.host_metrics or {}
+    uptime = metrics.get("uptime_seconds")
+
+    model = hardware.get("model")
+    if model and hardware.get("revision"):
+        model_cell = f"{_esc(model)} (rev {_esc(hardware['revision'])})"
+    else:
+        model_cell = _dash(model)
+    cpu_bits = [
+        part
+        for part in (
+            hardware.get("cpu_model"),
+            hardware.get("cpu_architecture"),
+            f"{hardware['cpu_cores']} cores" if hardware.get("cpu_cores") else None,
+        )
+        if part
+    ]
+    os_name = os_info.get("name")
+    os_cell = (
+        f"{_esc(os_name)} {_esc(os_info['release'])}"
+        if os_name and os_info.get("release")
+        else _dash(os_name)
+    )
+    rows = [
+        ("Manufacturer", _dash(hardware.get("manufacturer"))),
+        ("Hardware model", model_cell),
+        ("CPU", _esc(" · ".join(cpu_bits)) if cpu_bits else "—"),
+        ("Installed memory", _fmt_installed_memory(hardware.get("memory_total_bytes"))),
+        ("Operating system", os_cell),
+        ("Kernel", _dash(os_info.get("kernel"))),
+        ("Hostname", _dash(os_info.get("hostname"))),
+        ("Uptime", _fmt_duration(uptime)),
+        ("Last reboot", _esc(_fmt_last_reboot(uptime, snapshot.generated_at))),
+        # Maintenance status (§3d): spot systems needing attention fast.
+        (
+            "Last apt update",
+            _fmt_epoch_age(maintenance.get("last_apt_update_epoch"), snapshot.generated_at),
+        ),
+        ("Last full-upgrade", _dash(maintenance.get("last_apt_full_upgrade"))),
+        ("Updates available", _dash(maintenance.get("updates_available"))),
+        (
+            "Reboot required",
+            _bool_badge(maintenance.get("reboot_required"), "required", "no")
+            if "reboot_required" in maintenance
+            else "—",
+        ),
+    ]
+    if not inventory:
+        note = '<p class="muted">no host inventory received yet</p>'
+    else:
+        note = ""
+    body = "".join(f"<tr><th>{_esc(label)}</th><td>{value}</td></tr>" for label, value in rows)
+    return f'<section><h2>System</h2>{note}<table class="kv">{body}</table></section>'
+
+
+def _render_storage_section(snapshot: MonitorSnapshot) -> str:
+    """Structured storage inventory (§3b) with single-disk fallback."""
+    inventory = snapshot.host_inventory or {}
+    devices = inventory.get("storage") or []
+    if not devices:
+        # Graceful fallback: the pre-M003.5 single-disk line from
+        # system_metrics, until the collector reports an inventory event.
+        disk = (snapshot.host_metrics or {}).get("disk") or {}
+        if not disk:
+            return (
+                "<section><h2>Storage</h2>"
+                '<p class="muted">no storage inventory received yet</p></section>'
+            )
+        line = (
+            f"Disk {_esc(disk.get('path', '/'))}: "
+            f"{_fmt_used(disk.get('used_bytes'), disk.get('used_percent'))} used, "
+            f"{_fmt_bytes(disk.get('free_bytes'))} free of {_fmt_bytes(disk.get('total_bytes'))}"
+        )
+        return f"<section><h2>Storage</h2><p>{line}</p></section>"
+    rows = "".join(
+        "<tr>"
+        f"<td>{_dash(d.get('name'))}</td>"
+        f"<td>{_dash(d.get('type'))}</td>"
+        f"<td>{_dash(d.get('transport'))}</td>"
+        f"<td>{_fmt_bytes(d.get('capacity_bytes'))}</td>"
+        f"<td>{_dash(d.get('brand'))}</td>"
+        f"<td>{_dash(d.get('mount'))}</td>"
+        f"<td>{_dash(d.get('filesystem'))}</td>"
+        f"<td>{_fmt_used(d.get('used_bytes'), d.get('used_percent'))}</td>"
+        f"<td>{_fmt_bytes(d.get('free_bytes'))}</td>"
+        "</tr>"
+        for d in devices
+        if isinstance(d, dict)
+    )
+    return (
+        "<section><h2>Storage</h2><table>"
+        "<tr><th>Device</th><th>Type</th><th>Transport</th><th>Size</th>"
+        "<th>Brand</th><th>Mount</th><th>FS</th><th>Used</th><th>Free</th></tr>"
+        f"{rows}</table></section>"
+    )
+
+
+def _render_interfaces_section(snapshot: MonitorSnapshot) -> str:
+    """Interfaces + default route (M003.5 §3-monitor)."""
+    network = (snapshot.host_inventory or {}).get("network") or {}
+    interfaces = network.get("interfaces") or []
+    if not interfaces:
+        return (
+            "<section><h2>Interfaces</h2>"
+            '<p class="muted">no interface inventory received yet</p></section>'
+        )
+    rows = "".join(
+        "<tr>"
+        f"<td>{_dash(i.get('name'))}</td>"
+        f"<td>{_dash(i.get('ipv4'))}</td>"
+        f"<td>{_link_state_badge(i.get('link_state'))}</td>"
+        "</tr>"
+        for i in interfaces
+        if isinstance(i, dict)
+    )
+    table = f"<table><tr><th>Interface</th><th>IPv4</th><th>Link</th></tr>{rows}</table>"
+    route = network.get("default_route") or {}
+    if route:
+        route_line = (
+            f"<p>Default route: {_dash(route.get('gateway'))} "
+            f"dev {_dash(route.get('interface'))}</p>"
+        )
+    else:
+        route_line = '<p class="muted">no default route</p>'
+    return f"<section><h2>Interfaces</h2>{table}{route_line}</section>"
+
+
+def _link_state_badge(state: Any) -> str:
+    state_text = str(state or "unknown").lower()
+    css = {"up": "ok", "down": "crit"}.get(state_text, "unknown")
+    return f'<span class="badge {css}">{_esc(state_text.upper())}</span>'
+
+
+def _event_detail(event: Event) -> str:
+    """One-line, fully escaped summary for a Recent Events row."""
+    payload = event.payload or {}
+    if event.event_type == MISSION_UPDATE_EVENT_TYPE:
+        mission = payload.get("mission_id", "?")
+        state = payload.get("state", "?")
+        detail = f"{mission} → {state}"
+        if payload.get("backfill"):
+            detail += " (backfill)"
+        return _esc(detail)
+    if event.event_type in (OFFLINE_EVENT_TYPE, ONLINE_EVENT_TYPE):
+        return _esc(f"{payload.get('previous', '?')} → {payload.get('current', '?')}")
+    if event.event_type == SERVICE_START_EVENT_TYPE:
+        commit = payload.get("git_commit")
+        commit_text = str(commit)[:12] if commit else "unknown"
+        return _esc(f"v{payload.get('version', '?')} · commit {commit_text}")
+    return _esc(str(payload)[:120])  # pragma: no cover - defensive default
+
+
+def _render_recent_events_section(snapshot: MonitorSnapshot) -> str:
+    """Recent Events (M003.5 §4): last 20 notable events, newest first."""
+    if not snapshot.recent_events:
+        rows = '<tr><td colspan="4" class="muted">no notable events yet</td></tr>'
+    else:
+        rows = "".join(
+            "<tr>"
+            f"<td>{_fmt_age(e.timestamp, snapshot.generated_at)}</td>"
+            f"<td>{_esc(e.collector_id)}</td>"
+            f'<td><span class="badge state">{_esc(e.event_type)}</span></td>'
+            f"<td>{_event_detail(e)}</td>"
+            "</tr>"
+            for e in snapshot.recent_events
+        )
+    return (
+        f"<section><h2>Recent Events (last {RECENT_EVENTS_LIMIT})</h2>"
+        "<table><tr><th>When</th><th>Asset</th><th>Event</th><th>Detail</th></tr>"
+        f"{rows}</table>"
+        '<p class="muted">heartbeats are summarized as offline/online '
+        "transitions, not listed individually</p></section>"
+    )
+
+
 def _render_host_section(snapshot: MonitorSnapshot) -> str:
     metrics = snapshot.host_metrics or {}
     cpu = metrics.get("cpu") or {}
     memory = metrics.get("memory") or {}
-    disk = metrics.get("disk") or {}
     network = metrics.get("network") or {}
     load = " / ".join(
         str(cpu.get(k)) if cpu.get(k) is not None else "—"
@@ -295,13 +567,6 @@ def _render_host_section(snapshot: MonitorSnapshot) -> str:
             f"({_fmt_bytes(memory.get('used_bytes'))} of "
             f"{_fmt_bytes(memory.get('total_bytes'))})",
         ),
-        (
-            "Disk /",
-            f"{_fmt_percent(disk.get('used_percent'))} used "
-            f"({_fmt_bytes(disk.get('free_bytes'))} free of "
-            f"{_fmt_bytes(disk.get('total_bytes'))})",
-        ),
-        ("Uptime", _fmt_duration(metrics.get("uptime_seconds"))),
         (
             "Network",
             _bool_badge(network.get("online"), "online", "offline")
@@ -342,16 +607,23 @@ def _render_docker_section(snapshot: MonitorSnapshot) -> str:
             f"<td>{_dash(c.get('name'))}</td>"
             f"<td>{_dash(c.get('image'))}</td>"
             f"<td>{_dash(c.get('status'))}</td>"
-            f"<td>{_dash(c.get('restart_count'))}</td>"
+            f"<td>{_dash(c.get('network_mode'))}</td>"
+            f"<td>{_fmt_duration(c.get('uptime_seconds'))}</td>"
             f"<td>{_fmt_percent(c.get('cpu_percent'))}</td>"
             f"<td>{_fmt_percent(c.get('memory_percent'))}</td>"
+            f"<td>{_fmt_bytes(c.get('network_rx_bytes'))}</td>"
+            f"<td>{_fmt_bytes(c.get('network_tx_bytes'))}</td>"
+            f"<td>{_dash(c.get('restart_count'))}</td>"
             "</tr>"
             for c in containers
             if isinstance(c, dict)
         )
+        # M003.5 §3-monitor: Network / Uptime / RX / TX / Restarts columns
+        # for container diagnosis.
         table = (
             "<table><tr><th>Container</th><th>Image</th><th>Status</th>"
-            f"<th>Restarts</th><th>CPU</th><th>RAM</th></tr>{rows}</table>"
+            "<th>Network</th><th>Uptime</th><th>CPU</th><th>RAM</th>"
+            f"<th>RX</th><th>TX</th><th>Restarts</th></tr>{rows}</table>"
         )
     return f"<section><h2>Docker</h2><p>{header}</p>{table}</section>"
 
@@ -420,10 +692,28 @@ def _active_mission_label(snapshot: MonitorSnapshot) -> str:
     return "none"
 
 
+def _collector_versions_label(snapshot: MonitorSnapshot) -> str:
+    """Collector versions from the newest heartbeats (M003.5 header).
+
+    The backend's own service asset is excluded — its \"collector\" is the
+    backend itself, already identified by the version at the front of the
+    header line.
+    """
+    parts = [
+        f"{_esc(a.fleet_id)} v{_esc(a.last_heartbeat.collector_version)}"
+        for a in snapshot.assets
+        if a.fleet_id != snapshot.backend_fleet_id
+        and a.last_heartbeat is not None
+        and a.last_heartbeat.collector_version
+    ]
+    return ", ".join(parts) if parts else "none reporting"
+
+
 def render_monitor_html(snapshot: MonitorSnapshot) -> str:
     """Render the full monitor page (pure function of the snapshot)."""
     db_badge = _bool_badge(snapshot.database_connected, "connected", "unreachable")
     commit = _esc(snapshot.git_commit[:12]) if snapshot.git_commit else "unknown"
+    built = _esc(snapshot.build_timestamp) if snapshot.build_timestamp else "unknown"
     return (
         "<!DOCTYPE html>"
         '<html lang="en"><head><meta charset="utf-8">'
@@ -432,19 +722,28 @@ def render_monitor_html(snapshot: MonitorSnapshot) -> str:
         "<title>Observatory Monitor</title>"
         f"<style>{_STYLE}</style></head><body>"
         "<h1>OpenClaw Observatory — Monitor</h1>"
-        # Deployment identification (supervisor review, PR 2): version,
-        # commit, and active mission up front so troubleshooting starts
-        # from exactly which software is running on this host.
+        # Deployment identification (supervisor review, PR 2; extended with
+        # build & release metadata, M003.5 §6): version, commit, build
+        # timestamp, environment, active mission, and collector versions up
+        # front so troubleshooting starts from exactly which software is
+        # running on this host.
         f'<p class="meta">{_esc(snapshot.backend_fleet_id)} '
         f"v{_esc(snapshot.backend_version)} · commit {commit} · "
-        f"mission {_active_mission_label(snapshot)} · database {db_badge} · "
+        f"built {built} · env {_esc(snapshot.deployment_environment)} · "
+        f"mission {_active_mission_label(snapshot)} · "
+        f"collectors {_collector_versions_label(snapshot)} · "
+        f"database {db_badge} · "
         f"backend up {_fmt_duration(snapshot.backend_uptime_seconds)} · "
         f"generated {_esc(snapshot.generated_at.strftime('%Y-%m-%d %H:%M:%S %Z'))} · "
         f"auto-refresh {REFRESH_SECONDS}s</p>"
         f"{_render_agent_section(snapshot)}"
         f"{_render_missions_section(snapshot)}"
+        f"{_render_system_section(snapshot)}"
         f"{_render_host_section(snapshot)}"
+        f"{_render_storage_section(snapshot)}"
+        f"{_render_interfaces_section(snapshot)}"
         f"{_render_docker_section(snapshot)}"
         f"{_render_fleet_section(snapshot)}"
+        f"{_render_recent_events_section(snapshot)}"
         "</body></html>"
     )

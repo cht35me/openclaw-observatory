@@ -73,6 +73,22 @@ class LifecycleStatus(StrEnum):
     RETIRED = "Retired"
 
 
+class Environment(StrEnum):
+    """Deployment environment classification (M003.5 §3e).
+
+    Applies to every asset (nodes, services, agents) so a mixed fleet
+    (production edge nodes, a staging VPS, a development bench Pi) stays
+    distinguishable in fleet-wide views. Single-node deployments simply
+    carry one value everywhere — the field costs nothing until the fleet
+    grows (scale-out without schema change).
+    """
+
+    PRODUCTION = "Production"
+    STAGING = "Staging"
+    DEVELOPMENT = "Development"
+    TEST = "Test"
+
+
 class Connectivity(StrEnum):
     """Heartbeat-derived reachability of an asset."""
 
@@ -147,6 +163,14 @@ class FleetAsset(BaseModel):
         description="Arbitrary filter tags, e.g. production, lab, singapore, edge, critical.",
     )
     status: LifecycleStatus = LifecycleStatus.ACTIVE
+    environment: Environment = Field(
+        default=Environment.DEVELOPMENT,
+        description=(
+            "Deployment environment classification (M003.5 §3e). Defaults to "
+            "Development — promotion to Production is an explicit, seeded/"
+            "administered statement, never an accident."
+        ),
+    )
     registered_at: datetime
     updated_at: datetime
 
@@ -201,6 +225,7 @@ class FleetAssetView(BaseModel):
     capabilities: tuple[str, ...]
     tags: tuple[str, ...]
     status: LifecycleStatus
+    environment: Environment
     registered_at: datetime
     updated_at: datetime
     last_heartbeat: HeartbeatInfo | None

@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from app.version import detect_git_commit
+from app.version import detect_build_timestamp, detect_git_commit
 
 SHA = "a" * 40
 OTHER_SHA = "b" * 40
@@ -45,6 +45,33 @@ def _make_checkout(root: Path, *, packed: bool = False, detached: bool = False) 
 def test_env_variable_wins(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("GIT_COMMIT", "deadbeef")
     assert detect_git_commit(tmp_path) == "deadbeef"
+
+
+def test_build_timestamp_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    """BUILD_TIMESTAMP wins over git detection (M003.5 §6)."""
+    monkeypatch.setenv("BUILD_TIMESTAMP", "2026-07-21T10:00:00+08:00")
+    assert detect_build_timestamp() == "2026-07-21T10:00:00+08:00"
+
+
+def test_build_timestamp_from_git_checkout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The test suite runs inside the repo: git yields an ISO timestamp."""
+    monkeypatch.delenv("BUILD_TIMESTAMP", raising=False)
+    value = detect_build_timestamp()
+    assert value is not None
+    assert re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", value)
+
+
+def test_build_timestamp_absent_git_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Honest absence: no env, no git → None (monitor renders `unknown`)."""
+    import subprocess
+
+    monkeypatch.delenv("BUILD_TIMESTAMP", raising=False)
+
+    def _boom(*args: object, **kwargs: object) -> None:
+        raise OSError("git not installed")
+
+    monkeypatch.setattr(subprocess, "run", _boom)
+    assert detect_build_timestamp() is None
 
 
 def test_loose_ref_resolved_walking_up(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

@@ -37,7 +37,9 @@ The Observatory is designed in two variants
 - Track agent identity, lifecycle, missions, and status through a central Fleet Registry.
 - Monitor the health of the hosts agents run on (Raspberry Pi nodes, VPS instances, workstations).
 - Surface engineering activity: repositories, branches, commits, Pull Requests, and reviews.
-- Surface AI usage: Claude Code status, token consumption, and estimated cost.
+- Surface AI usage: Claude Code status, token consumption, and estimated cost
+  (token accounting ownership:
+  [docs/token-usage-architecture.md](docs/token-usage-architecture.md)).
 - Alert a human supervisor when attention is required — and stay quiet otherwise.
 
 ## Long-Term Vision

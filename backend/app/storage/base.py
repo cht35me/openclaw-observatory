@@ -13,8 +13,10 @@ loop stays responsive.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 
 from app.models.event import Event
+from app.models.inventory import HostInventoryRecord
 from app.models.mission import MissionRecord
 from app.models.registry import FleetAsset
 
@@ -55,10 +57,13 @@ class EventStorage(ABC):
         self,
         collector_id: str | None = None,
         event_type: str | None = None,
+        event_types: Sequence[str] | None = None,
         limit: int = 100,
     ) -> list[Event]:
         """Return recent events, newest first, with optional exact-match filters.
 
+        ``event_type`` matches one type; ``event_types`` matches any of a
+        set (M003.5 Recent Events: one bounded query for all notable types).
         M002 needs only this simple read path (used by tests and future
         verification tooling); richer querying arrives with later missions.
         """
@@ -71,6 +76,35 @@ class EventStorage(ABC):
         """
         events = await self.query_events(collector_id=collector_id, event_type=event_type, limit=1)
         return events[0] if events else None
+
+
+class HostInventoryStorage(ABC):
+    """Interface for Host Inventory latest-state projections (M003.5 §3).
+
+    The durable record is the ``host_inventory`` event stream; this store
+    keeps only the newest inventory per host for fast reads (SD-018
+    versioned-row pattern, like registry and mission projections).
+    """
+
+    @abstractmethod
+    async def startup(self) -> None:
+        """Prepare the backend. Idempotent; may raise :class:`StorageError`."""
+
+    @abstractmethod
+    async def shutdown(self) -> None:
+        """Release resources. Must never raise."""
+
+    @abstractmethod
+    async def upsert_inventory(self, record: HostInventoryRecord) -> None:
+        """Insert or replace one inventory record (keyed by ``fleet_id``)."""
+
+    @abstractmethod
+    async def get_inventory(self, fleet_id: str) -> HostInventoryRecord | None:
+        """Return the latest inventory for one host, or ``None``."""
+
+    @abstractmethod
+    async def list_inventories(self) -> list[HostInventoryRecord]:
+        """Return the latest inventory per host, ordered by ``fleet_id``."""
 
 
 class RegistryStorage(ABC):

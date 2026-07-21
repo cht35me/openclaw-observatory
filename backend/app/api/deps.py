@@ -17,7 +17,7 @@ from app.config import Settings
 from app.metrics import AppMetrics
 from app.services.pipeline import EventPipeline
 from app.services.registry import RegistryService
-from app.storage.base import EventStorage, MissionStorage
+from app.storage.base import EventStorage, HostInventoryStorage, MissionStorage
 
 
 def get_settings(request: Request) -> Settings:
@@ -45,6 +45,11 @@ def get_mission_storage(request: Request) -> MissionStorage:
     return request.app.state.mission_storage
 
 
+def get_inventory_storage(request: Request) -> HostInventoryStorage:
+    """Return the Host Inventory projection storage backend (M003.5 §3)."""
+    return request.app.state.inventory_storage
+
+
 def get_pipeline(request: Request) -> EventPipeline:
     """Return the per-event-type ingestion pipeline."""
     return request.app.state.pipeline
@@ -55,4 +60,5 @@ StorageDep = Annotated[EventStorage, Depends(get_storage)]
 MetricsDep = Annotated[AppMetrics, Depends(get_metrics)]
 RegistryServiceDep = Annotated[RegistryService, Depends(get_registry_service)]
 MissionStorageDep = Annotated[MissionStorage, Depends(get_mission_storage)]
+InventoryStorageDep = Annotated[HostInventoryStorage, Depends(get_inventory_storage)]
 PipelineDep = Annotated[EventPipeline, Depends(get_pipeline)]

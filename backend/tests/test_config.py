@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from app.config import Settings
+from app.models.registry import Environment
 
 
 def _settings(api_keys: str) -> Settings:
@@ -85,3 +86,13 @@ def test_defaults() -> None:
     assert settings.clickhouse_port == 8123
     assert settings.clickhouse_database == "observatory"
     assert settings.max_request_bytes == 1_048_576
+
+
+def test_deployment_environment_default_and_parsing() -> None:
+    """M003.5 §3e/§6: Development by default; Production is explicit."""
+    assert Settings(_env_file=None).deployment_environment is Environment.DEVELOPMENT
+    settings = Settings(_env_file=None, deployment_environment="Production")
+    assert settings.deployment_environment is Environment.PRODUCTION
+
+    with pytest.raises(ValueError):
+        Settings(_env_file=None, deployment_environment="prod")  # exact values only
