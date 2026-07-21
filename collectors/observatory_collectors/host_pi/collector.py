@@ -1,12 +1,18 @@
-"""Raspberry Pi host collector assembly (Mission M003 §2/§10).
+"""Raspberry Pi host collector assembly (Mission M003 §2/§10, M003.5 §3).
 
-Produces three event kinds on the shared event model (no backend changes
+Produces four event kinds on the shared event model (no backend changes
 needed for future collectors):
 
 * ``heartbeat`` — liveness + versioning (emitted by the shared runner);
 * ``system_metrics`` — CPU/temperature/RAM/disk/load/uptime/network
   (payload shape consumed by the backend health score, M003 §9);
-* ``docker_status`` — daemon/container telemetry (M003 §10).
+* ``docker_status`` — daemon/container telemetry (M003 §10), extended with
+  network mode, per-container uptime, and RX/TX byte counters (M003.5);
+* ``host_inventory`` — Host Inventory (M003.5 §3): hardware identity, OS
+  identity, structured storage inventory, interfaces, maintenance status.
+  Sent on start, when the durable identity changes, and at
+  ``INVENTORY_INTERVAL`` (default hourly) — identity is slow-moving and
+  does not belong in the 30-second telemetry stream.
 """
 
 from __future__ import annotations
@@ -15,11 +21,12 @@ import argparse
 import logging
 import platform
 import time
+from collections.abc import Callable
 from typing import Any
 
 from observatory_collectors.client import ObservatoryClient
 from observatory_collectors.config import CollectorConfig
-from observatory_collectors.host_pi import docker_stats, metrics
+from observatory_collectors.host_pi import docker_stats, inventory, metrics
 from observatory_collectors.runner import CollectorRunner, EventTuple, Task
 
 COLLECTOR_TYPE = "raspberry"
@@ -27,7 +34,9 @@ COLLECTOR_TYPE = "raspberry"
 #: Payload schema versions, bumped when a payload shape changes (M003 §1
 #: collector versioning: makes rolling upgrades observable).
 SYSTEM_METRICS_SCHEMA = 1
-DOCKER_STATUS_SCHEMA = 1
+#: v2 (M003.5): adds network mode/names, per-container uptime, RX/TX bytes.
+DOCKER_STATUS_SCHEMA = 2
+HOST_INVENTORY_SCHEMA = 1
 
 
 def software_version() -> str | None:
@@ -76,12 +85,50 @@ def produce_docker() -> list[EventTuple]:
     return [("docker_status", docker_stats.collect(), DOCKER_STATUS_SCHEMA)]
 
 
+class InventoryTelemetry:
+    """host_inventory producer: on start, on durable change, and hourly.
+
+    The producer is scheduled at the fast telemetry interval but only *emits*
+    when due: the first run, when the identity signature changes (a disk or
+    interface appeared, a kernel booted, …), or when ``inventory_interval``
+    elapsed. The signature check uses only cheap file reads; the maintenance
+    section (which shells out to read-only ``apt list --upgradable``) is
+    gathered only when an event is actually emitted.
+    """
+
+    def __init__(
+        self,
+        interval: float,
+        now_fn: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._interval = interval
+        self._now = now_fn
+        self._last_sent: float | None = None
+        self._last_signature: str | None = None
+
+    def produce(self) -> list[EventTuple]:
+        now = self._now()
+        payload = inventory.collect_identity()
+        signature = inventory.stable_signature(payload)
+        due = self._last_sent is None or (now - self._last_sent) >= self._interval
+        if not due and signature == self._last_signature:
+            return []
+        payload["maintenance"] = inventory.read_maintenance()
+        self._last_sent = now
+        self._last_signature = signature
+        return [("host_inventory", payload, HOST_INVENTORY_SCHEMA)]
+
+
 def build_runner(config: CollectorConfig) -> CollectorRunner:
     client = ObservatoryClient(config)
     telemetry = HostTelemetry()
+    inventory_telemetry = InventoryTelemetry(config.inventory_interval)
     tasks = [
         Task("system_metrics", config.telemetry_interval, telemetry.produce),
         Task("docker_status", config.telemetry_interval, produce_docker),
+        # Scheduled fast, emits slow: the producer applies change detection
+        # and the inventory_interval cadence itself.
+        Task("host_inventory", config.telemetry_interval, inventory_telemetry.produce),
     ]
     return CollectorRunner(
         config,

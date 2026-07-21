@@ -41,6 +41,9 @@ class CollectorConfig:
     heartbeat_interval: float
     telemetry_interval: float
     mission_poll_interval: float
+    #: Host-inventory re-report interval (M003.5 §3): inventory is slow-moving
+    #: identity data, sent on start, on change, and at this cadence.
+    inventory_interval: float
     request_timeout: float
     max_retries: int
 
@@ -79,6 +82,7 @@ class CollectorConfig:
             heartbeat_interval=heartbeat_interval,
             telemetry_interval=_float_env(env, "TELEMETRY_INTERVAL", heartbeat_interval),
             mission_poll_interval=_float_env(env, "MISSION_POLL_INTERVAL", 60.0),
+            inventory_interval=_float_env(env, "INVENTORY_INTERVAL", 3600.0),
             request_timeout=_float_env(env, "REQUEST_TIMEOUT", 10.0),
             max_retries=int(_float_env(env, "MAX_RETRIES", 3.0)),
         )
