@@ -20,12 +20,13 @@ from __future__ import annotations
 import argparse
 import logging
 import platform
+import sys
 import time
 from collections.abc import Callable
 from typing import Any
 
 from observatory_collectors.client import ObservatoryClient
-from observatory_collectors.config import CollectorConfig
+from observatory_collectors.config import CollectorConfig, ConfigError
 from observatory_collectors.host_pi import docker_stats, inventory, metrics
 from observatory_collectors.runner import CollectorRunner, EventTuple, Task
 
@@ -145,7 +146,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    config = CollectorConfig.from_env(default_collector_name="host-pi")
+    try:
+        # Fail fast, before any collection starts (M003.5 §2): a clear
+        # one-line error beats a traceback in the journal.
+        config = CollectorConfig.from_env(default_collector_name="host-pi")
+    except ConfigError as exc:
+        print(f"observatory-host-collector: configuration error: {exc}", file=sys.stderr)
+        return 2
     runner = build_runner(config)
     if args.once:
         submitted = runner.run_once()

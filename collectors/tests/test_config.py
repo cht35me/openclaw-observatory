@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from observatory_collectors.config import CollectorConfig, ConfigError
@@ -59,3 +61,43 @@ def test_invalid_values_rejected() -> None:
         CollectorConfig.from_env({**BASE_ENV, "HEARTBEAT_INTERVAL": "-5"})
     with pytest.raises(ConfigError):
         CollectorConfig.from_env({**BASE_ENV, "OBSERVATORY_URL": "ftp://nope"})
+
+
+def test_placeholder_key_rejected() -> None:
+    """An unedited config.example.env must fail fast (M003.5 §2)."""
+    with pytest.raises(ConfigError, match="placeholder"):
+        CollectorConfig.from_env({**BASE_ENV, "OBSERVATORY_API_KEY": "change-me-collector-key"})
+
+
+def test_host_collector_main_fails_fast_with_clear_error(capsys) -> None:
+    """`python -m observatory_collectors.host_pi` with bad config: exit 2, no traceback."""
+    from observatory_collectors.host_pi.collector import main
+
+    saved = dict(os.environ)
+    try:
+        os.environ.pop("OBSERVATORY_API_KEY", None)
+        os.environ.pop("OBSERVATORY_API_KEY_FILE", None)
+        os.environ.pop("FLEET_ID", None)
+        assert main(["--once"]) == 2
+    finally:
+        os.environ.clear()
+        os.environ.update(saved)
+    err = capsys.readouterr().err
+    assert "observatory-host-collector: configuration error" in err
+    assert "OBSERVATORY_API_KEY" in err
+
+
+def test_agent_collector_main_fails_fast_with_clear_error(capsys) -> None:
+    from observatory_collectors.openclaw_agent.collector import main
+
+    saved = dict(os.environ)
+    try:
+        os.environ.pop("OBSERVATORY_API_KEY", None)
+        os.environ.pop("OBSERVATORY_API_KEY_FILE", None)
+        os.environ.pop("FLEET_ID", None)
+        assert main(["--once"]) == 2
+    finally:
+        os.environ.clear()
+        os.environ.update(saved)
+    err = capsys.readouterr().err
+    assert "observatory-agent-collector: configuration error" in err

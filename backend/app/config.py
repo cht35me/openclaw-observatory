@@ -15,10 +15,26 @@ from __future__ import annotations
 import json
 from functools import cached_property
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.models.registry import Environment
+
+#: Placeholder marker used by every committed ``*.example`` file. A live
+#: deployment that still carries it has skipped the "edit the config" step,
+#: so startup validation rejects it (docs/deployment.md §12).
+PLACEHOLDER_MARKER = "change-me"
+
+_VALID_LOG_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
+
+
+class ConfigurationError(RuntimeError):
+    """Startup configuration is missing or invalid (fail fast, M003.5 §2).
+
+    Raised by :func:`load_settings` before the server binds its socket so a
+    misconfigured deployment dies with one clear, secret-free message instead
+    of serving requests it cannot authenticate or store.
+    """
 
 
 class Settings(BaseSettings):
@@ -149,6 +165,77 @@ class Settings(BaseSettings):
         return bindings
 
 
+    def startup_problems(self) -> list[str]:
+        """Validate operational invariants beyond field-level type checks.
+
+        Returns human-readable problems (never secret values). Empty list
+        means the configuration is safe to serve with. Called on the
+        production startup path (:func:`load_settings`); tests that build
+        :class:`Settings` directly may bypass it deliberately (e.g. the
+        empty-API_KEYS auth test).
+        """
+        problems: list[str] = []
+
+        bindings: tuple[tuple[str, str], ...] = ()
+        try:
+            bindings = self.api_key_bindings
+        except ValueError as exc:
+            problems.append(f"API_KEYS is invalid: {exc}")
+        else:
+            if not bindings:
+                problems.append(
+                    "API_KEYS is required: no collector could authenticate. Set at least "
+                    "one `collector_id:key` binding in the backend env file (SD-017)."
+                )
+        if any(PLACEHOLDER_MARKER in key for _, key in bindings):
+            problems.append(
+                "API_KEYS still contains a placeholder value from deploy/backend.example.env; "
+                "generate real keys with `openssl rand -hex 32` and edit the env file."
+            )
+
+        if self.log_level.upper() not in _VALID_LOG_LEVELS:
+            problems.append(
+                f"LOG_LEVEL must be one of {sorted(_VALID_LOG_LEVELS)}, got {self.log_level!r}"
+            )
+
+        if self.offline_timeout <= self.heartbeat_interval:
+            problems.append(
+                "OFFLINE_TIMEOUT must exceed HEARTBEAT_INTERVAL "
+                f"({self.offline_timeout} <= {self.heartbeat_interval}): the backend would "
+                "mark every asset offline between its own heartbeats."
+            )
+
+        return problems
+
+
+def _format_validation_error(exc: ValidationError) -> str:
+    """Render pydantic field errors as env-var-named bullets (no values)."""
+    lines = []
+    for error in exc.errors(include_input=False, include_url=False):
+        field = "".join(str(part) for part in error["loc"]) or "<settings>"
+        lines.append(f"  - {field.upper()}: {error['msg']}")
+    return "\n".join(lines)
+
+
 def load_settings() -> Settings:
-    """Build a :class:`Settings` instance from the environment."""
-    return Settings()
+    """Build and validate :class:`Settings` from the environment.
+
+    Fail-fast contract (M003.5 §2): any missing or invalid configuration
+    raises :class:`ConfigurationError` with a clear, secret-free message
+    *before* the application starts serving. ``uvicorn --factory
+    app.main:build_app`` therefore exits non-zero on bad config instead of
+    binding the port.
+    """
+    try:
+        settings = Settings()
+    except ValidationError as exc:
+        raise ConfigurationError(
+            "invalid environment configuration:\n" + _format_validation_error(exc)
+        ) from None
+    problems = settings.startup_problems()
+    if problems:
+        raise ConfigurationError(
+            "invalid environment configuration:\n"
+            + "\n".join(f"  - {problem}" for problem in problems)
+        )
+    return settings
