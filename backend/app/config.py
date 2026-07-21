@@ -76,6 +76,13 @@ class Settings(BaseSettings):
     # "Production" is always an explicit operator statement.
     deployment_environment: Environment = Environment.DEVELOPMENT
 
+    # --- Monitor display timezone (M003.6 §3) ---
+    # IANA name (e.g. "Asia/Singapore") for wall-clock values on /monitor
+    # ("Last reboot"). Empty = the host's local timezone (/etc/localtime,
+    # honouring TZ). Internal timestamps and the "generated … UTC" footer
+    # stay UTC; an invalid name falls back safely (never breaks the page).
+    display_tz: str = ""
+
     # Request size limit (bytes) enforced by middleware (security.md checklist).
     max_request_bytes: int = Field(default=1_048_576, gt=0)
 

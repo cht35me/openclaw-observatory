@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 from fastapi.testclient import TestClient
 
@@ -27,6 +28,7 @@ from app.services.monitor import (
     _fmt_percent,
     _fmt_used,
     render_monitor_html,
+    resolve_display_timezone,
 )
 from tests.conftest import auth_headers
 
@@ -244,11 +246,62 @@ INVENTORY = {
 
 def test_fmt_last_reboot_humanization() -> None:
     noon = datetime(2026, 7, 21, 12, 0, 0, tzinfo=UTC)
-    assert _fmt_last_reboot(3600, noon) == "Today 11:00"
-    assert _fmt_last_reboot(13 * 3600, noon) == "Yesterday 23:00"
+    assert _fmt_last_reboot(3600, noon) == "Today 11:00 (+00)"
+    assert _fmt_last_reboot(13 * 3600, noon) == "Yesterday 23:00 (+00)"
     assert _fmt_last_reboot(3 * 86400 + 60, noon) == "3 days ago"
     assert _fmt_last_reboot(None, noon) == "—"
     assert _fmt_last_reboot("x", noon) == "—"
+
+
+def test_fmt_last_reboot_in_display_timezone() -> None:
+    """Day boundaries follow DISPLAY_TZ, not UTC (M003.6 §3)."""
+    sg = ZoneInfo("Asia/Singapore")
+    # Boot 2026-07-21 16:30Z = 2026-07-22 00:30 +08 — "Today" in Singapore
+    # even though it is still "yesterday" in UTC terms.
+    now = datetime(2026, 7, 21, 17, 0, 0, tzinfo=UTC)  # 2026-07-22 01:00 +08
+    assert _fmt_last_reboot(1800, now, sg) == "Today 00:30 (+08)"
+    # The same instant renders as Today 16:30 in UTC.
+    assert _fmt_last_reboot(1800, now, UTC) == "Today 16:30 (+00)"
+    # Boot 2026-07-21 15:30Z = 23:30 +08 — "Yesterday" in Singapore,
+    # still "Today" in UTC.
+    assert _fmt_last_reboot(5400, now, sg) == "Yesterday 23:30 (+08)"
+    assert _fmt_last_reboot(5400, now, UTC) == "Today 15:30 (+00)"
+    # Non-whole-hour offsets carry minutes in the suffix.
+    india = ZoneInfo("Asia/Kolkata")
+    assert _fmt_last_reboot(1800, now, india) == "Today 22:00 (+05:30)"
+    # Negative offsets keep the sign.
+    lima = ZoneInfo("America/Lima")
+    assert _fmt_last_reboot(1800, now, lima) == "Today 11:30 (-05)"
+
+
+def test_resolve_display_timezone() -> None:
+    """Explicit override, default (host local), and safe fallback (M003.6 §3)."""
+    # Explicit IANA override wins.
+    assert str(resolve_display_timezone("Asia/Singapore")) == "Asia/Singapore"
+    # Empty / None -> host local timezone; must be usable, never raise.
+    for value in ("", None, "   "):
+        tz = resolve_display_timezone(value)
+        assert NOW.astimezone(tz).utcoffset() is not None
+    # Invalid names fall back safely to the host timezone (never break the
+    # page); the fallback equals the default resolution.
+    fallback = resolve_display_timezone("Not/A_Zone")
+    assert NOW.astimezone(fallback) == NOW.astimezone(resolve_display_timezone(""))
+
+
+def test_snapshot_display_tz_reaches_last_reboot_row() -> None:
+    """The rendered System section uses the snapshot's display timezone."""
+    now = datetime(2026, 7, 21, 17, 0, 0, tzinfo=UTC)
+    snapshot = _snapshot(
+        generated_at=now,
+        host_fleet_id="RPSG01",
+        host_metrics={"uptime_seconds": 1800},
+        host_metrics_at=now,
+        display_tz=ZoneInfo("Asia/Singapore"),
+    )
+    html = render_monitor_html(snapshot)
+    assert "Today 00:30 (+08)" in html
+    # The footer stays UTC (internal timestamps unchanged).
+    assert "generated 2026-07-21 17:00:00 UTC" in html
 
 
 def test_fmt_used_and_installed_memory() -> None:
