@@ -51,6 +51,12 @@ class CollectorConfig:
     inventory_interval: float
     request_timeout: float
     max_retries: int
+    #: Explicit executable paths for the agent collector's CLI probes
+    #: (M003.6 §1). systemd user units run with a minimal PATH that misses
+    #: per-user installs (e.g. ``~/.local/bin/claude``), so the probes accept
+    #: configured absolute paths; unset means "discover on PATH" as before.
+    claude_bin: str | None
+    openclaw_bin: str | None
 
     @classmethod
     def from_env(
@@ -95,4 +101,6 @@ class CollectorConfig:
             inventory_interval=_float_env(env, "INVENTORY_INTERVAL", 3600.0),
             request_timeout=_float_env(env, "REQUEST_TIMEOUT", 10.0),
             max_retries=int(_float_env(env, "MAX_RETRIES", 3.0)),
+            claude_bin=env.get("CLAUDE_BIN", "").strip() or None,
+            openclaw_bin=env.get("OPENCLAW_BIN", "").strip() or None,
         )

@@ -25,7 +25,11 @@ Environment (beyond the shared M003 §8 variables):
 * ``AGENT_STATE_FILE`` — JSON status document maintained by the agent;
 * ``AGENT_PROCESS_PATTERN`` — pgrep pattern for the agent process
   (default ``openclaw``);
-* ``AGENT_MODEL_ID`` — fallback model identifier when the state file has none.
+* ``AGENT_MODEL_ID`` — fallback model identifier when the state file has none;
+* ``CLAUDE_BIN`` / ``OPENCLAW_BIN`` — explicit executable paths for the CLI
+  probes (M003.6 §1); unset falls back to PATH discovery. Parsed by
+  :class:`CollectorConfig` because systemd user units run with a minimal
+  PATH that misses per-user installs.
 """
 
 from __future__ import annotations
@@ -55,10 +59,14 @@ class AgentTelemetry:
         state_file: str | None,
         process_pattern: str = "openclaw",
         model_fallback: str | None = None,
+        claude_bin: str | None = None,
+        openclaw_bin: str | None = None,
     ) -> None:
         self._state_file = state_file
         self._process_pattern = process_pattern
         self._model_fallback = model_fallback
+        self._claude_bin = claude_bin
+        self._openclaw_bin = openclaw_bin
         #: mission_id -> last submitted state (client-side dedup).
         self._submitted_states: dict[str, str] = {}
 
@@ -72,8 +80,8 @@ class AgentTelemetry:
             "mission_state": state.get("mission_state"),
             "last_completed_task": state.get("last_completed_task"),
             "model": state.get("model") or self._model_fallback,
-            "claude_code": probes.probe_claude_code(),
-            "runtime_version": probes.probe_runtime_version(),
+            "claude_code": probes.probe_claude_code(self._claude_bin),
+            "runtime_version": probes.probe_runtime_version(self._openclaw_bin),
             "process_uptime_seconds": probes.probe_process_uptime(self._process_pattern),
         }
         return [("agent_status", payload, AGENT_STATUS_SCHEMA)]
@@ -105,8 +113,8 @@ class AgentTelemetry:
         return events
 
 
-def software_version() -> str | None:
-    return probes.probe_runtime_version()
+def software_version(openclaw_bin: str | None = None) -> str | None:
+    return probes.probe_runtime_version(openclaw_bin)
 
 
 def build_runner(config: CollectorConfig, env: dict[str, str] | None = None) -> CollectorRunner:
@@ -116,6 +124,8 @@ def build_runner(config: CollectorConfig, env: dict[str, str] | None = None) -> 
         state_file=env.get("AGENT_STATE_FILE") or None,
         process_pattern=env.get("AGENT_PROCESS_PATTERN", "openclaw"),
         model_fallback=env.get("AGENT_MODEL_ID") or None,
+        claude_bin=config.claude_bin,
+        openclaw_bin=config.openclaw_bin,
     )
     tasks = [
         Task("agent_status", config.telemetry_interval, telemetry.produce_status),
@@ -130,7 +140,7 @@ def build_runner(config: CollectorConfig, env: dict[str, str] | None = None) -> 
         client,
         tasks,
         collector_type=COLLECTOR_TYPE,
-        software_version_fn=software_version,
+        software_version_fn=lambda: software_version(config.openclaw_bin),
     )
 
 

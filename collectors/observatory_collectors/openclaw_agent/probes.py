@@ -10,6 +10,10 @@ Data sources:
   docs/security.md §9).
 * **CLI probes**: Claude Code availability (``claude --version``) and
   OpenClaw runtime version (``openclaw --version``), both best-effort.
+  Executable paths are configurable (``CLAUDE_BIN`` / ``OPENCLAW_BIN``,
+  M003.6 §1) because systemd user units run with a minimal PATH that does
+  not include per-user installs; unset falls back to PATH discovery via
+  :func:`shutil.which`.
 * **/proc**: agent process uptime via the process start time in
   ``/proc/<pid>/stat``.
 
@@ -100,11 +104,17 @@ def read_state_file(path: str | None) -> dict[str, Any]:
 
 
 def _cli_version(binary: str) -> str | None:
-    if shutil.which(binary) is None:
+    """``<binary> --version`` → first output line, or ``None``.
+
+    ``binary`` may be a bare name (resolved on PATH) or an explicit path
+    (``shutil.which`` validates that a path with a separator is executable).
+    """
+    resolved = shutil.which(binary)
+    if resolved is None:
         return None
     try:
         result = subprocess.run(
-            [binary, "--version"],
+            [resolved, "--version"],
             capture_output=True,
             text=True,
             timeout=_CLI_TIMEOUT,
@@ -118,18 +128,48 @@ def _cli_version(binary: str) -> str | None:
     return output.splitlines()[0][:_MAX_FIELD_LENGTH] if output else None
 
 
-def probe_claude_code() -> dict[str, Any]:
-    """Claude Code availability + version (M003 §3)."""
-    version = _cli_version("claude")
+def probe_claude_code(claude_bin: str | None = None) -> dict[str, Any]:
+    """Claude Code availability + version (M003 §3).
+
+    ``claude_bin`` (``CLAUDE_BIN``) points at the executable explicitly;
+    unset falls back to PATH discovery (M003.6 §1).
+    """
+    version = _cli_version(claude_bin or "claude")
     return {"available": version is not None, "version": version}
 
 
-def probe_runtime_version() -> str | None:
-    """OpenClaw runtime version (falls back to the Node.js version)."""
-    version = _cli_version("openclaw")
+def _runtime_node_binary(openclaw_bin: str | None) -> str:
+    """The ``node`` that actually runs OpenClaw (M003.6 §1).
+
+    OpenClaw ships its own Node.js next to the ``openclaw`` launcher
+    (e.g. ``~/.openclaw/tools/node-v24.15.0/bin/``); reporting the system
+    ``/usr/bin/node`` version instead would misstate the runtime. When an
+    explicit ``OPENCLAW_BIN`` is configured, prefer its sibling ``node``.
+    """
+    if openclaw_bin:
+        sibling = Path(openclaw_bin).parent / "node"
+        if sibling.is_file() and os.access(sibling, os.X_OK):
+            return str(sibling)
+    return "node"
+
+
+def probe_runtime_version(openclaw_bin: str | None = None) -> str | None:
+    """OpenClaw runtime version, including the Node.js it runs on.
+
+    ``openclaw_bin`` (``OPENCLAW_BIN``) points at the launcher explicitly;
+    unset falls back to PATH discovery. Output forms:
+
+    * ``OpenClaw 2026.6.11 (…) · node v24.15.0`` — both probes succeeded;
+    * ``OpenClaw 2026.6.11 (…)`` — launcher found, node version not;
+    * ``node v24.15.0`` — launcher missing, node fallback only;
+    * ``None`` — nothing found.
+    """
+    version = _cli_version(openclaw_bin or "openclaw")
+    node = _cli_version(_runtime_node_binary(openclaw_bin))
+    if version and node:
+        return f"{version} · node {node}"[:_MAX_FIELD_LENGTH]
     if version:
         return version
-    node = _cli_version("node")
     return f"node {node}" if node else None
 
 
