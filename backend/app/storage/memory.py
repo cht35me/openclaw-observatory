@@ -8,11 +8,19 @@ and lost on restart.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 
 from app.models.event import Event
+from app.models.inventory import HostInventoryRecord
 from app.models.mission import MissionRecord
 from app.models.registry import FleetAsset
-from app.storage.base import EventStorage, MissionStorage, RegistryStorage, StorageError
+from app.storage.base import (
+    EventStorage,
+    HostInventoryStorage,
+    MissionStorage,
+    RegistryStorage,
+    StorageError,
+)
 
 
 class InMemoryEventStorage(EventStorage):
@@ -49,6 +57,7 @@ class InMemoryEventStorage(EventStorage):
         self,
         collector_id: str | None = None,
         event_type: str | None = None,
+        event_types: Sequence[str] | None = None,
         limit: int = 100,
     ) -> list[Event]:
         if self.fail:
@@ -59,6 +68,7 @@ class InMemoryEventStorage(EventStorage):
                 for event in self._events
                 if (collector_id is None or event.collector_id == collector_id)
                 and (event_type is None or event.event_type == event_type)
+                and (event_types is None or event.event_type in event_types)
             ]
         selected.sort(key=lambda event: event.received_at, reverse=True)
         return selected[:limit]
@@ -96,6 +106,40 @@ class InMemoryRegistryStorage(RegistryStorage):
             raise StorageError("in-memory registry set to fail")
         async with self._lock:
             return [self._assets[key] for key in sorted(self._assets)]
+
+
+class InMemoryHostInventoryStorage(HostInventoryStorage):
+    """Host Inventory storage backed by a process-local dict (tests/dev only)."""
+
+    def __init__(self) -> None:
+        self._inventories: dict[str, HostInventoryRecord] = {}
+        self._lock = asyncio.Lock()
+        self.fail = False
+
+    async def startup(self) -> None:
+        if self.fail:
+            raise StorageError("in-memory inventory storage set to fail")
+
+    async def shutdown(self) -> None:
+        return None
+
+    async def upsert_inventory(self, record: HostInventoryRecord) -> None:
+        if self.fail:
+            raise StorageError("in-memory inventory storage set to fail")
+        async with self._lock:
+            self._inventories[record.fleet_id] = record
+
+    async def get_inventory(self, fleet_id: str) -> HostInventoryRecord | None:
+        if self.fail:
+            raise StorageError("in-memory inventory storage set to fail")
+        async with self._lock:
+            return self._inventories.get(fleet_id)
+
+    async def list_inventories(self) -> list[HostInventoryRecord]:
+        if self.fail:
+            raise StorageError("in-memory inventory storage set to fail")
+        async with self._lock:
+            return [self._inventories[key] for key in sorted(self._inventories)]
 
 
 class InMemoryMissionStorage(MissionStorage):

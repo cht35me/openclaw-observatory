@@ -20,15 +20,18 @@ import pytest
 
 from app.config import Settings
 from app.models.event import Event
+from app.models.inventory import HostInventoryRecord
 from app.models.mission import MissionRecord
 from app.models.registry import (
     AssetType,
     DeploymentRole,
+    Environment,
     FleetAsset,
     LifecycleStatus,
 )
 from app.storage.clickhouse import (
     ClickHouseEventStorage,
+    ClickHouseHostInventoryStorage,
     ClickHouseMissionStorage,
     ClickHouseRegistryStorage,
 )
@@ -130,6 +133,7 @@ def test_registry_versioned_upsert_roundtrip() -> None:
             capabilities=("telemetry", "heartbeat"),
             tags=("lab",),
             status=LifecycleStatus.ACTIVE,
+            environment=Environment.STAGING,
             registered_at=now,
             updated_at=now,
         )
@@ -143,6 +147,7 @@ def test_registry_versioned_upsert_roundtrip() -> None:
         assert stored.service_version == "v1"
         assert stored.capabilities == ("telemetry", "heartbeat")
         assert stored.tags == ("lab",)
+        assert stored.environment is Environment.STAGING  # M003.5 §3e column
 
         # Update: new versioned row must supersede the old one under FINAL.
         updated = stored.model_copy(update={"nickname": "Testy", "status": LifecycleStatus.PAUSED})
@@ -203,5 +208,77 @@ def test_mission_versioned_upsert_roundtrip() -> None:
 
         await missions.shutdown()
         await events.shutdown()
+
+    asyncio.run(scenario())
+
+
+def test_host_inventory_versioned_upsert_roundtrip() -> None:
+    """host_inventory projection (M003.5 §3): latest revision per host wins."""
+
+    async def scenario() -> None:
+        events = ClickHouseEventStorage(_SETTINGS)
+        await events.startup()  # applies migration 0004
+        inventories = ClickHouseHostInventoryStorage(_SETTINGS)
+        await inventories.startup()
+
+        now = datetime.now(UTC)
+        fleet_id = f"ITESTHOST{uuid4().hex[:6].upper()}"
+        payload = {
+            "hardware": {"model": "Raspberry Pi 4 Model B", "memory_total_bytes": 3980185600},
+            "os": {"kernel": "6.18.34+rpt-rpi-v8"},
+            "storage": [{"name": "SD1", "transport": "SD", "smart_health": "PASSED"}],
+        }
+        record = HostInventoryRecord(
+            fleet_id=fleet_id, payload=payload, reported_at=now, updated_at=now
+        )
+        await inventories.upsert_inventory(record)
+        stored = await inventories.get_inventory(fleet_id)
+        assert stored is not None
+        assert stored.payload == payload  # JSON payload, extra keys preserved
+
+        updated = stored.model_copy(update={"payload": {**payload, "os": {"kernel": "6.19.0"}}})
+        await inventories.upsert_inventory(updated)
+        stored = await inventories.get_inventory(fleet_id)
+        assert stored.payload["os"]["kernel"] == "6.19.0"
+
+        listing = await inventories.list_inventories()
+        assert sum(1 for item in listing if item.fleet_id == fleet_id) == 1
+
+        await inventories.shutdown()
+        await events.shutdown()
+
+    asyncio.run(scenario())
+
+
+def test_query_events_multi_type_filter() -> None:
+    """Recent Events selection (M003.5 §4): one bounded IN-filtered query."""
+
+    async def scenario() -> None:
+        storage = ClickHouseEventStorage(_SETTINGS)
+        await storage.startup()
+
+        now = datetime.now(UTC)
+        collector = f"itest-{uuid4().hex[:8]}"
+        for event_type in ("service_start", "heartbeat", "asset_offline"):
+            await storage.insert_event(
+                Event(
+                    id=uuid4(),
+                    collector_id=collector,
+                    timestamp=now,
+                    event_type=event_type,
+                    payload={"n": 1},
+                    schema_version=1,
+                    received_at=now,
+                )
+            )
+
+        notable = await storage.query_events(
+            collector_id=collector,
+            event_types=("service_start", "asset_offline"),
+            limit=20,
+        )
+        assert {event.event_type for event in notable} == {"service_start", "asset_offline"}
+
+        await storage.shutdown()
 
     asyncio.run(scenario())

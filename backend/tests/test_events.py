@@ -26,7 +26,9 @@ def test_event_persisted_with_canonical_fields(
     response = client.post("/api/v1/events", json=VALID_EVENT, headers=auth_headers())
     assert response.status_code == 202
 
-    stored = client.portal.call(storage.query_events)
+    # The app records its own service_start event at startup (M003.5 §4);
+    # filter to the submitted telemetry type.
+    stored = client.portal.call(lambda: storage.query_events(event_type="synthetic"))
     assert len(stored) == 1
     event = stored[0]
     assert str(event.id) == response.json()["id"]
@@ -95,4 +97,6 @@ def test_validation_failure_does_not_persist(
     payload = {**VALID_EVENT, "timestamp": "not-a-timestamp"}
     response = client.post("/api/v1/events", json=payload, headers=auth_headers())
     assert response.status_code == 422
-    assert client.portal.call(storage.query_events) == []
+    # Only the backend's own startup service_start event may be present.
+    stored = client.portal.call(storage.query_events)
+    assert [e.event_type for e in stored] == ["service_start"]

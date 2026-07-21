@@ -32,13 +32,14 @@ from app.config import Settings
 from app.metrics import AppMetrics
 from app.models.event import Event, EventIn
 from app.models.heartbeat import HEARTBEAT_EVENT_TYPE, HeartbeatPayload
+from app.models.inventory import HOST_INVENTORY_EVENT_TYPE, HostInventoryRecord
 from app.models.mission import (
     MISSION_STATES,
     MissionRecord,
     MissionUpdate,
     is_valid_transition,
 )
-from app.storage.base import MissionStorage, RegistryStorage
+from app.storage.base import HostInventoryStorage, MissionStorage, RegistryStorage
 
 _logger = logging.getLogger("observatory.pipeline")
 
@@ -136,6 +137,52 @@ class HeartbeatHandler(EventHandler):
         ).inc()
         self._metrics.collector_reported_failures.labels(collector_id=event.collector_id).set(
             payload.failures_total
+        )
+
+
+class HostInventoryHandler(EventHandler):
+    """Projects ``host_inventory`` events into the latest-state store (M003.5 §3).
+
+    The event stream stays the durable record; this handler keeps one
+    versioned row per host (SD-018) so reads never scan history. Payload
+    sections are validated to be a JSON object but otherwise schema-flexible
+    — collectors may add keys (SMART data, new hardware) without a backend
+    release.
+    """
+
+    event_type = HOST_INVENTORY_EVENT_TYPE
+
+    def __init__(self, registry: RegistryStorage, inventories: HostInventoryStorage) -> None:
+        self._registry = registry
+        self._inventories = inventories
+
+    async def validate(self, inbound: EventIn) -> None:
+        if not isinstance(inbound.payload, dict) or not inbound.payload:
+            raise PipelineRejection(
+                status_code=422,
+                detail="host_inventory payload must be a non-empty JSON object.",
+                reason="validation_error",
+            )
+        # Mirror the heartbeat rule: inventory describes a *registered* host;
+        # collectors can never introduce identities via telemetry (M003 §1).
+        if await self._registry.get_asset(inbound.collector_id) is None:
+            raise PipelineRejection(
+                status_code=403,
+                detail="Unknown fleet identity; not present in the Fleet Registry.",
+                reason="unknown_fleet_id",
+            )
+
+    async def apply(self, event: Event) -> None:
+        record = HostInventoryRecord(
+            fleet_id=event.collector_id,
+            payload=event.payload,
+            reported_at=event.timestamp,
+            updated_at=event.received_at,
+        )
+        await self._inventories.upsert_inventory(record)
+        _logger.info(
+            "host inventory updated",
+            extra={"collector_id": event.collector_id, "event_id": str(event.id)},
         )
 
 
@@ -251,6 +298,7 @@ def build_pipeline(
     registry: RegistryStorage,
     missions: MissionStorage,
     metrics: AppMetrics,
+    inventories: HostInventoryStorage,
     now_fn: Callable[[], datetime] = _utcnow,
 ) -> EventPipeline:
     """Assemble the default handler set."""
@@ -258,5 +306,6 @@ def build_pipeline(
         (
             HeartbeatHandler(registry, metrics, now_fn=now_fn),
             MissionUpdateHandler(missions),
+            HostInventoryHandler(registry, inventories),
         )
     )

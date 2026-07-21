@@ -23,6 +23,7 @@ process), so it is detected once at import time.
 from __future__ import annotations
 
 import os
+import subprocess
 from pathlib import Path
 
 _HEAD_REF_PREFIX = "ref: "
@@ -86,3 +87,45 @@ def detect_git_commit(start: Path | None = None) -> str | None:
 
 #: Detected once at import — the checkout under a running server is fixed.
 GIT_COMMIT: str | None = detect_git_commit()
+
+
+def detect_build_timestamp() -> str | None:
+    """Best-effort build timestamp for the monitor (M003.5 §6). Never raises.
+
+    There is no build pipeline stamping artifacts yet (deployments run from
+    a git checkout), so "build timestamp" is defined as *the committer
+    timestamp of the deployed commit* — verifiable, reproducible, and
+    matching what "which build is this?" actually asks. Resolution order
+    (judgment call, docs/M003.5-notes.md):
+
+    1. the ``BUILD_TIMESTAMP`` environment variable wins — set it in
+       packaged/container deployments where a real build step exists;
+    2. otherwise ``git log -1 --format=%cI`` runs **once at import** (the
+       checkout under a running server is fixed). This is the one deliberate
+       subprocess exception to the no-subprocess rule above: commit
+       timestamps live in packfiles, which stdlib-only parsing cannot read
+       economically;
+    3. if neither yields a value the monitor renders an honest ``unknown``.
+    """
+    env = os.environ.get("BUILD_TIMESTAMP", "").strip()
+    if env:
+        return env
+    try:
+        result = subprocess.run(
+            ["git", "log", "-1", "--format=%cI"],
+            capture_output=True,
+            text=True,
+            timeout=5.0,
+            check=False,
+            cwd=Path(__file__).resolve().parent,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    value = result.stdout.strip()
+    return value or None
+
+
+#: Detected once at import, like :data:`GIT_COMMIT`.
+BUILD_TIMESTAMP: str | None = detect_build_timestamp()

@@ -40,6 +40,16 @@ def test_seed_identity_model() -> None:
     assert obln["service_version"] == "v1"
 
 
+def test_seed_declares_environment_and_default_is_development() -> None:
+    """M003.5 §3e: seeded fleet assets are Production; the model default
+    stays Development so unclassified assets never masquerade as prod."""
+    from app.models.registry import Environment
+
+    for entry in SEED_ASSETS:
+        assert entry["environment"] is Environment.PRODUCTION
+    assert _asset().environment is Environment.DEVELOPMENT
+
+
 def _asset(**overrides) -> FleetAsset:
     now = datetime(2026, 7, 20, 12, 0, tzinfo=UTC)
     base = {
@@ -146,6 +156,7 @@ def test_fleet_list_returns_seeded_assets(client: TestClient) -> None:
     assert obln["service_version"] == "v1"
     assert by_id["RPSG01"]["asset_type"] == "node"
     assert a001["status"] == "Active"
+    assert a001["environment"] == "Production"  # M003.5 §3e classification
     # No heartbeat has ever been received in a fresh test app.
     assert a001["connectivity"] == "unknown"
     assert a001["health"] == "Unknown"

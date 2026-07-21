@@ -18,6 +18,8 @@ from functools import cached_property
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.models.registry import Environment
+
 
 class Settings(BaseSettings):
     """Application settings, populated from environment variables.
@@ -51,6 +53,12 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     app_version: str = "0.1.0"
     app_name: str = "openclaw-observatory-backend"
+
+    # --- Deployment identity (M003.5 §3e/§6) ---
+    # Environment classification of THIS deployment, shown on the monitor
+    # and part of the build/release metadata. Defaults to Development so
+    # "Production" is always an explicit operator statement.
+    deployment_environment: Environment = Environment.DEVELOPMENT
 
     # Request size limit (bytes) enforced by middleware (security.md checklist).
     max_request_bytes: int = Field(default=1_048_576, gt=0)

@@ -38,6 +38,10 @@ def test_insert_and_query_filters() -> None:
         assert len(await storage.query_events(collector_id="demo")) == 2
         assert len(await storage.query_events(event_type="synthetic")) == 2
         assert len(await storage.query_events(collector_id="demo", event_type="heartbeat")) == 1
+        # Multi-type filter (M003.5 Recent Events selection).
+        assert len(await storage.query_events(event_types=("synthetic", "heartbeat"))) == 3
+        assert len(await storage.query_events(event_types=("heartbeat",))) == 1
+        assert len(await storage.query_events(event_types=("nope",))) == 0
         assert len(await storage.query_events(limit=2)) == 2
         assert await storage.ping() is True
         await storage.shutdown()

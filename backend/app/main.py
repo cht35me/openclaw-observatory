@@ -37,9 +37,17 @@ from app.services.offline import BackendHeartbeat, OfflineDetector
 from app.services.pipeline import build_pipeline
 from app.services.registry import RegistryService
 from app.services.seed import seed_registry
-from app.storage.base import EventStorage, MissionStorage, RegistryStorage, StorageError
+from app.services.startup_event import record_service_start
+from app.storage.base import (
+    EventStorage,
+    HostInventoryStorage,
+    MissionStorage,
+    RegistryStorage,
+    StorageError,
+)
 from app.storage.clickhouse import (
     ClickHouseEventStorage,
+    ClickHouseHostInventoryStorage,
     ClickHouseMissionStorage,
     ClickHouseRegistryStorage,
 )
@@ -52,6 +60,7 @@ def create_app(
     storage: EventStorage | None = None,
     registry_storage: RegistryStorage | None = None,
     mission_storage: MissionStorage | None = None,
+    inventory_storage: HostInventoryStorage | None = None,
 ) -> FastAPI:
     """Build a fully wired FastAPI application.
 
@@ -63,6 +72,8 @@ def create_app(
         registry_storage: Optional Fleet Registry backend (defaults to
             ClickHouse; tests pass the in-memory variant).
         mission_storage: Optional mission projection backend (same pattern).
+        inventory_storage: Optional Host Inventory projection backend
+            (M003.5 §3; same pattern).
     """
     settings = settings or load_settings()
     configure_logging(settings.log_level)
@@ -78,6 +89,10 @@ def create_app(
         mission_storage = ClickHouseMissionStorage(
             settings, on_db_latency=metrics.observe_db_latency
         )
+    if inventory_storage is None:
+        inventory_storage = ClickHouseHostInventoryStorage(
+            settings, on_db_latency=metrics.observe_db_latency
+        )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -88,10 +103,18 @@ def create_app(
             await storage.startup()
             await registry_storage.startup()
             await mission_storage.startup()
+            await inventory_storage.startup()
             created = await seed_registry(registry_storage)
             if created:
                 _logger.info("fleet registry seeded with %d asset(s)", created)
             _logger.info("storage backends ready")
+            # Recent-events visibility (M003.5 §4): backend start is a
+            # notable lifecycle event. Best effort — a failed insert must
+            # never block startup.
+            try:
+                await record_service_start(settings, storage)
+            except StorageError:
+                _logger.warning("could not record service_start event")
         except StorageError:
             # Start in degraded mode: /health reports it, collectors get 503
             # on ingest, and the app keeps retrying lazily on later requests.
@@ -116,6 +139,7 @@ def create_app(
         await storage.shutdown()
         await registry_storage.shutdown()
         await mission_storage.shutdown()
+        await inventory_storage.shutdown()
 
     app = FastAPI(
         title="OpenClaw Observatory API",
@@ -136,8 +160,11 @@ def create_app(
     #     detection, backend self-heartbeat. ---
     app.state.registry_storage = registry_storage
     app.state.mission_storage = mission_storage
+    app.state.inventory_storage = inventory_storage
     app.state.registry_service = RegistryService(settings, registry_storage, storage)
-    app.state.pipeline = build_pipeline(settings, registry_storage, mission_storage, metrics)
+    app.state.pipeline = build_pipeline(
+        settings, registry_storage, mission_storage, metrics, inventory_storage
+    )
     app.state.offline_detector = OfflineDetector(settings, registry_storage, storage, metrics)
     app.state.backend_heartbeat = BackendHeartbeat(
         settings,

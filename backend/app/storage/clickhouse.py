@@ -35,7 +35,7 @@ import asyncio
 import json
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -45,9 +45,22 @@ import clickhouse_connect
 
 from app.config import Settings
 from app.models.event import Event
+from app.models.inventory import HostInventoryRecord
 from app.models.mission import MissionRecord
-from app.models.registry import AssetType, DeploymentRole, FleetAsset, LifecycleStatus
-from app.storage.base import EventStorage, MissionStorage, RegistryStorage, StorageError
+from app.models.registry import (
+    AssetType,
+    DeploymentRole,
+    Environment,
+    FleetAsset,
+    LifecycleStatus,
+)
+from app.storage.base import (
+    EventStorage,
+    HostInventoryStorage,
+    MissionStorage,
+    RegistryStorage,
+    StorageError,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from clickhouse_connect.driver.client import Client
@@ -85,7 +98,16 @@ _REGISTRY_COLUMNS = (
     "capabilities",
     "tags",
     "status",
+    "environment",
     "registered_at",
+    "updated_at",
+    "revision",
+)
+
+_INVENTORY_COLUMNS = (
+    "fleet_id",
+    "payload",
+    "reported_at",
     "updated_at",
     "revision",
 )
@@ -308,6 +330,7 @@ class ClickHouseEventStorage(_ClickHouseConnection, EventStorage):
         self,
         collector_id: str | None = None,
         event_type: str | None = None,
+        event_types: Sequence[str] | None = None,
         limit: int = 100,
     ) -> list[Event]:
         conditions: list[str] = []
@@ -318,6 +341,9 @@ class ClickHouseEventStorage(_ClickHouseConnection, EventStorage):
         if event_type is not None:
             conditions.append("event_type = {event_type:String}")
             parameters["event_type"] = event_type
+        if event_types is not None:
+            conditions.append("event_type IN {event_types:Array(String)}")
+            parameters["event_types"] = list(event_types)
         where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         query = (
             f"SELECT {', '.join(_EVENT_COLUMNS)} FROM {self._table} "
@@ -383,6 +409,7 @@ class ClickHouseRegistryStorage(_ClickHouseConnection, RegistryStorage):
             list(asset.capabilities),
             list(asset.tags),
             asset.status.value,
+            asset.environment.value,
             asset.registered_at,
             asset.updated_at,
             _revision(),
@@ -427,6 +454,7 @@ class ClickHouseRegistryStorage(_ClickHouseConnection, RegistryStorage):
             capabilities,
             tags,
             status,
+            environment,
             registered_at,
             updated_at,
             _rev,
@@ -447,7 +475,72 @@ class ClickHouseRegistryStorage(_ClickHouseConnection, RegistryStorage):
             capabilities=tuple(capabilities),
             tags=tuple(tags),
             status=LifecycleStatus(status),
+            environment=Environment(environment) if environment else Environment.DEVELOPMENT,
             registered_at=_as_utc(registered_at),
+            updated_at=_as_utc(updated_at),
+        )
+
+
+class ClickHouseHostInventoryStorage(_ClickHouseConnection, HostInventoryStorage):
+    """Host Inventory projection on ``host_inventory`` (ReplacingMergeTree).
+
+    Schema is created by migration ``0004_host_inventory.sql``. The payload
+    is stored as a JSON String (schema-flexible sections, M003.5 scale-out
+    requirement); latest-row reads use FINAL per SD-018.
+    """
+
+    def __init__(
+        self,
+        settings: Settings,
+        on_db_latency: Callable[[str, float], None] | None = None,
+    ) -> None:
+        super().__init__(settings, on_db_latency)
+        self._table = f"`{self._database}`.`host_inventory`"
+
+    async def startup(self) -> None:
+        if not await self._ping():
+            raise StorageError("ClickHouse unreachable for host inventory storage")
+
+    async def shutdown(self) -> None:
+        await self._close()
+
+    async def upsert_inventory(self, record: HostInventoryRecord) -> None:
+        row = [
+            record.fleet_id,
+            json.dumps(record.payload, separators=(",", ":")),
+            record.reported_at,
+            record.updated_at,
+            _revision(),
+        ]
+        await self._run(
+            "inventory_upsert",
+            lambda client: client.insert(self._table, [row], column_names=list(_INVENTORY_COLUMNS)),
+        )
+
+    async def get_inventory(self, fleet_id: str) -> HostInventoryRecord | None:
+        query = (
+            f"SELECT {', '.join(_INVENTORY_COLUMNS)} FROM {self._table} FINAL "
+            "WHERE fleet_id = {fleet_id:String} LIMIT 1"
+        )
+        result = await self._run(
+            "inventory_get",
+            lambda client: client.query(query, parameters={"fleet_id": fleet_id}),
+        )
+        rows = result.result_rows
+        return self._row_to_inventory(rows[0]) if rows else None
+
+    async def list_inventories(self) -> list[HostInventoryRecord]:
+        query = f"SELECT {', '.join(_INVENTORY_COLUMNS)} FROM {self._table} FINAL ORDER BY fleet_id"
+        result = await self._run("inventory_list", lambda client: client.query(query))
+        return [self._row_to_inventory(row) for row in result.result_rows]
+
+    @staticmethod
+    def _row_to_inventory(row: tuple[Any, ...]) -> HostInventoryRecord:
+        fleet_id, payload, reported_at, updated_at, _rev = row
+        return HostInventoryRecord(
+            fleet_id=fleet_id,
+            payload=json.loads(payload),
+            reported_at=_as_utc(reported_at),
             updated_at=_as_utc(updated_at),
         )
 

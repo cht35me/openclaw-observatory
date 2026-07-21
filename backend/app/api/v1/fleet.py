@@ -20,8 +20,9 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.api.deps import RegistryServiceDep
+from app.api.deps import InventoryStorageDep, RegistryServiceDep
 from app.auth import CollectorPrincipal, require_collector
+from app.models.inventory import HostInventoryRecord
 from app.models.registry import FleetAssetView
 
 router = APIRouter(prefix="/api/v1", tags=["fleet"])
@@ -58,3 +59,35 @@ async def get_fleet_asset(
             detail="Unknown fleet_id.",
         )
     return view
+
+
+@router.get(
+    "/fleet/{fleet_id}/inventory",
+    response_model=HostInventoryRecord,
+    summary="Fetch the latest Host Inventory for one node",
+)
+async def get_host_inventory(
+    fleet_id: str,
+    registry: RegistryServiceDep,
+    inventories: InventoryStorageDep,
+    _principal: Annotated[CollectorPrincipal, Depends(require_collector)],
+) -> HostInventoryRecord:
+    """Return the newest ``host_inventory`` projection for one host (M003.5 §3).
+
+    404 when the Fleet ID is unknown *or* the host has not reported
+    inventory yet. This is the stored full-host model the future central
+    node's enhanced Fleet & Services view renders — the local monitor keeps
+    the reduced view by design (§3e).
+    """
+    if await registry.get_view(fleet_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Unknown fleet_id.",
+        )
+    record = await inventories.get_inventory(fleet_id)
+    if record is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No host inventory reported for this fleet_id yet.",
+        )
+    return record
