@@ -59,6 +59,17 @@ VPS Production (monitored, backed up, rollback-ready)
   real values injected per environment (env vars / host-local files).
 - One configuration mechanism across environments; differences are values, not shapes.
 - Configuration changes to production follow the same review path as code.
+- Deployment-identity variables (M003.5 §3e/§6):
+  - `DEPLOYMENT_ENVIRONMENT` — backend; `Production | Staging | Development |
+    Test` (exact values), default `Development`. Shown on the monitor header
+    and stamped into `service_start` events; production deployments must set
+    it explicitly.
+  - `BUILD_TIMESTAMP` — backend, optional; overrides the detected commit
+    timestamp in packaged/container builds (defaults to
+    `git log -1 --format=%cI` of the running checkout, else `unknown`).
+  - `INVENTORY_INTERVAL` — host collector; host-inventory re-report cadence
+    in seconds (default `3600`; inventory is also sent on start and on
+    durable change).
 
 ## 4. Secrets Management
 

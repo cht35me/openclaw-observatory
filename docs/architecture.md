@@ -168,6 +168,37 @@ variant runs on each local host (see §1).
 - **Alternative:** Alertmanager-based routing once Prometheus enters the stack; email as
   a low-urgency fallback.
 
+### 2.11 Host Inventory vs Fleet Registry — M003.5 §3
+
+Two deliberately distinct concepts (M003.5 supervisor specification):
+
+- **Host Inventory** — *information about THIS machine*: hardware identity
+  (manufacturer, model, revision, CPU, installed memory, serial), operating
+  system identity (OS, release, kernel, hostname), structured multi-device
+  storage inventory, network interfaces, and maintenance status (apt
+  update/upgrade recency, pending updates, reboot-required). It is
+  **observed** by the host collector (`host_inventory` events: on start, on
+  durable change, hourly) and projected into a latest-row-per-host table
+  (SD-018 versioned rows; JSON payload so new keys — e.g. SMART data —
+  need no schema change).
+- **Fleet Registry** — *information aggregated about ALL nodes*: administered
+  identity and lifecycle (all nodes, all services, environment
+  classification, versions, status, last heartbeat). It is **seeded/
+  administered**, never writable by collectors (M003 §1).
+
+The distinction becomes important with multiple collectors: every node
+reports its own full host information, while the registry stays the fleet-
+wide source of identity. Deployment views (SD-001): the **local** node
+shows full host information plus the *reduced* Fleet & Services table (the
+M003 implementation, unchanged); the **central** node will show full host
+information per node plus the *enhanced* view — rendered from the same
+stored model (`/api/v1/fleet/{id}` + `/api/v1/fleet/{id}/inventory`), which
+already carries every §3e field (see
+[M003.5-notes.md §2](M003.5-notes.md)). Each asset additionally carries an
+`environment` classification (Production | Staging | Development | Test),
+and the backend itself declares `DEPLOYMENT_ENVIRONMENT` as part of its
+build/release metadata (M003.5 §6).
+
 ## 3. Cross-Cutting Concerns
 
 - **Failure isolation:** ingestion validates and stores each payload independently; a
