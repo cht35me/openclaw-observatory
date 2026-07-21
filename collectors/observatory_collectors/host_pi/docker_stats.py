@@ -24,6 +24,7 @@ _CLI_TIMEOUT = 20.0
 # Pure parsers (tested with canned CLI output)
 # --------------------------------------------------------------------- #
 
+
 def parse_inspect_output(inspect_json: str) -> list[dict[str, Any]]:
     """Container facts from ``docker inspect`` JSON (name, state, restarts)."""
     try:
@@ -102,6 +103,7 @@ def summarize(containers: list[dict[str, Any]]) -> dict[str, int]:
 # CLI wrappers (fail soft)
 # --------------------------------------------------------------------- #
 
+
 def _run(args: list[str]) -> str | None:
     try:
         result = subprocess.run(
@@ -124,9 +126,7 @@ def collect() -> dict[str, Any]:
         inspect_output = _run(["docker", "inspect", *container_ids])
         containers = parse_inspect_output(inspect_output or "[]")
 
-        stats_output = _run(
-            ["docker", "stats", "--no-stream", "--format", "{{json .}}"]
-        )
+        stats_output = _run(["docker", "stats", "--no-stream", "--format", "{{json .}}"])
         stats = parse_stats_output(stats_output or "")
         for container in containers:
             container.update(stats.get(container["name"], {}))

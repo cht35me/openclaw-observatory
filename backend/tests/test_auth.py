@@ -67,9 +67,7 @@ def test_no_configured_keys_rejects_everything() -> None:
     settings = Settings(_env_file=None, api_keys="")
     app = create_app(settings=settings, storage=InMemoryEventStorage())
     with TestClient(app) as client:
-        response = client.post(
-            "/api/v1/events", json=VALID_EVENT, headers=auth_headers("anything")
-        )
+        response = client.post("/api/v1/events", json=VALID_EVENT, headers=auth_headers("anything"))
         assert response.status_code == 401
 
 
@@ -89,7 +87,5 @@ def test_authenticator_unit() -> None:
 def test_key_never_echoed_in_response(client: TestClient) -> None:
     """Auth failures must not reflect the presented credential."""
     secret_attempt = "super-secret-attempt"
-    response = client.post(
-        "/api/v1/events", json=VALID_EVENT, headers=auth_headers(secret_attempt)
-    )
+    response = client.post("/api/v1/events", json=VALID_EVENT, headers=auth_headers(secret_attempt))
     assert secret_attempt not in response.text

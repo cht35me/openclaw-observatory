@@ -127,16 +127,16 @@ class HeartbeatHandler(EventHandler):
     async def apply(self, event: Event) -> None:
         payload = HeartbeatPayload.model_validate(event.payload)
         latency = (event.received_at - event.timestamp).total_seconds()
-        self._metrics.heartbeat_latency_seconds.labels(
-            collector_id=event.collector_id
-        ).observe(max(latency, 0.0))
+        self._metrics.heartbeat_latency_seconds.labels(collector_id=event.collector_id).observe(
+            max(latency, 0.0)
+        )
         self._metrics.heartbeats_received_total.labels(
             collector_id=event.collector_id,
             collector_type=payload.collector_type,
         ).inc()
-        self._metrics.collector_reported_failures.labels(
-            collector_id=event.collector_id
-        ).set(payload.failures_total)
+        self._metrics.collector_reported_failures.labels(collector_id=event.collector_id).set(
+            payload.failures_total
+        )
 
 
 class MissionUpdateHandler(EventHandler):
@@ -208,8 +208,7 @@ class MissionUpdateHandler(EventHandler):
         record = MissionRecord(
             mission_id=update.mission_id,
             title=update.title or (current.title if current else update.mission_id),
-            assigned_agent=update.assigned_agent
-            or (current.assigned_agent if current else None),
+            assigned_agent=update.assigned_agent or (current.assigned_agent if current else None),
             state=update.state,
             created_at=created_at,
             started_at=started_at,

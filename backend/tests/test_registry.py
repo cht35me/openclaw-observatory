@@ -197,12 +197,7 @@ def test_heartbeat_updates_derived_view(client: TestClient) -> None:
 def test_registry_has_no_write_routes(client: TestClient) -> None:
     """Collectors must never create or modify identities through the API."""
     for method in ("post", "put", "patch"):
-        response = getattr(client, method)(
-            "/api/v1/fleet", headers=auth_headers(), json={}
-        )
+        response = getattr(client, method)("/api/v1/fleet", headers=auth_headers(), json={})
         assert response.status_code == 405, method
     assert client.delete("/api/v1/fleet", headers=auth_headers()).status_code == 405
-    assert (
-        client.put("/api/v1/fleet/A001", headers=auth_headers(), json={}).status_code
-        == 405
-    )
+    assert client.put("/api/v1/fleet/A001", headers=auth_headers(), json={}).status_code == 405

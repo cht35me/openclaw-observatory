@@ -47,9 +47,7 @@ def test_env_variable_wins(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> N
     assert detect_git_commit(tmp_path) == "deadbeef"
 
 
-def test_loose_ref_resolved_walking_up(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_loose_ref_resolved_walking_up(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("GIT_COMMIT", raising=False)
     nested = _make_checkout(tmp_path)
     assert detect_git_commit(nested) == SHA
@@ -69,9 +67,7 @@ def test_detached_head_returns_sha_directly(
     assert detect_git_commit(nested) == SHA
 
 
-def test_no_checkout_returns_none(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_no_checkout_returns_none(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("GIT_COMMIT", raising=False)
     assert detect_git_commit(tmp_path) is None
 

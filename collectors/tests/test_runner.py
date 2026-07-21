@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from observatory_collectors import __version__
 from observatory_collectors.config import CollectorConfig
 from observatory_collectors.runner import CollectorRunner, Task
-from observatory_collectors import __version__
 
 CONFIG = CollectorConfig.from_env(
     {

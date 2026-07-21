@@ -37,7 +37,12 @@ def _post(client: TestClient, body: dict):
 
 def test_transition_rules_normal_operation() -> None:
     assert MISSION_STATES == (
-        "Created", "Queued", "Assigned", "Running", "Review", "Completed",
+        "Created",
+        "Queued",
+        "Assigned",
+        "Running",
+        "Review",
+        "Completed",
     )
     assert is_valid_transition(None, "Created")
     assert is_valid_transition("Created", "Queued")
@@ -104,9 +109,7 @@ def test_backward_transition_rejected(client: TestClient) -> None:
     assert "Illegal mission transition" in response.json()["detail"]
 
     # Regression stays rejected even with the backfill flag.
-    response = _post(
-        client, _update("Running", T0 + timedelta(minutes=2), backfill=True)
-    )
+    response = _post(client, _update("Running", T0 + timedelta(minutes=2), backfill=True))
     assert response.status_code == 409
 
     # The projection kept the last valid state.
@@ -124,9 +127,7 @@ def test_forward_skip_requires_backfill(client: TestClient) -> None:
     assert "backfill" in response.json()["detail"]
 
     # The same jump with the privileged flag is accepted.
-    response = _post(
-        client, _update("Running", T0 + timedelta(minutes=2), backfill=True)
-    )
+    response = _post(client, _update("Running", T0 + timedelta(minutes=2), backfill=True))
     assert response.status_code == 202
 
     mission = client.get("/api/v1/missions/M003", headers=auth_headers()).json()
@@ -142,9 +143,7 @@ def test_unknown_mission_must_enter_at_created(client: TestClient) -> None:
 
 def test_completed_terminal_even_with_backfill(client: TestClient) -> None:
     assert _post(client, _update("Completed", T0, backfill=True)).status_code == 202
-    response = _post(
-        client, _update("Running", T0 + timedelta(minutes=1), backfill=True)
-    )
+    response = _post(client, _update("Running", T0 + timedelta(minutes=1), backfill=True))
     assert response.status_code == 409
     # Metadata-refresh self-loop remains legal.
     response = _post(
@@ -205,9 +204,7 @@ def test_transitions_visible_as_events(client: TestClient, storage) -> None:
 
 def test_missions_list_and_404(client: TestClient) -> None:
     assert client.get("/api/v1/missions", headers=auth_headers()).json() == []
-    assert (
-        client.get("/api/v1/missions/M999", headers=auth_headers()).status_code == 404
-    )
+    assert client.get("/api/v1/missions/M999", headers=auth_headers()).status_code == 404
 
     _post(client, _update("Created", T0))
     listing = client.get("/api/v1/missions", headers=auth_headers()).json()

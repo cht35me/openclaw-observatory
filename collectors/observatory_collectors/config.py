@@ -58,13 +58,9 @@ class CollectorConfig:
             try:
                 api_key = Path(key_file).read_text(encoding="utf-8").strip()
             except OSError as exc:
-                raise ConfigError(
-                    f"cannot read OBSERVATORY_API_KEY_FILE {key_file!r}"
-                ) from exc
+                raise ConfigError(f"cannot read OBSERVATORY_API_KEY_FILE {key_file!r}") from exc
         if not api_key:
-            raise ConfigError(
-                "OBSERVATORY_API_KEY (or OBSERVATORY_API_KEY_FILE) is required"
-            )
+            raise ConfigError("OBSERVATORY_API_KEY (or OBSERVATORY_API_KEY_FILE) is required")
 
         fleet_id = env.get("FLEET_ID", "").strip()
         if not fleet_id:
@@ -79,12 +75,9 @@ class CollectorConfig:
             observatory_url=url,
             api_key=api_key,
             fleet_id=fleet_id,
-            collector_name=env.get("COLLECTOR_NAME", "").strip()
-            or default_collector_name,
+            collector_name=env.get("COLLECTOR_NAME", "").strip() or default_collector_name,
             heartbeat_interval=heartbeat_interval,
-            telemetry_interval=_float_env(
-                env, "TELEMETRY_INTERVAL", heartbeat_interval
-            ),
+            telemetry_interval=_float_env(env, "TELEMETRY_INTERVAL", heartbeat_interval),
             mission_poll_interval=_float_env(env, "MISSION_POLL_INTERVAL", 60.0),
             request_timeout=_float_env(env, "REQUEST_TIMEOUT", 10.0),
             max_retries=int(_float_env(env, "MAX_RETRIES", 3.0)),

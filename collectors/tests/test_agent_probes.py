@@ -14,8 +14,12 @@ STATE = {
     "last_completed_task": "M002 merged",
     "model": "anthropic/claude-fable-5",
     "missions": [
-        {"mission_id": "M003", "title": "Observatory Self-Awareness",
-         "state": "Running", "assigned_agent": "A001"},
+        {
+            "mission_id": "M003",
+            "title": "Observatory Self-Awareness",
+            "state": "Running",
+            "assigned_agent": "A001",
+        },
     ],
 }
 
@@ -94,8 +98,9 @@ def test_mission_backfill_rules(tmp_path) -> None:
 
     # An explicit backfill flag in the state file is passed through untouched
     # (operator-driven recovery jump for an already-synced mission).
-    jump = {"missions": [{"mission_id": "M009", "title": "T", "state": "Running",
-                          "backfill": True}]}
+    jump = {
+        "missions": [{"mission_id": "M009", "title": "T", "state": "Running", "backfill": True}]
+    }
     state_file.write_text(json.dumps(jump), encoding="utf-8")
     events = telemetry.produce_mission_updates()
     assert len(events) == 1

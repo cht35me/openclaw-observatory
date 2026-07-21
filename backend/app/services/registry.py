@@ -64,9 +64,7 @@ class RegistryService:
     async def _build_view(self, asset: FleetAsset) -> FleetAssetView:
         now = self._now_fn()
 
-        heartbeat_event = await self._events.latest_event(
-            asset.fleet_id, HEARTBEAT_EVENT_TYPE
-        )
+        heartbeat_event = await self._events.latest_event(asset.fleet_id, HEARTBEAT_EVENT_TYPE)
         heartbeat: HeartbeatInfo | None = None
         heartbeat_age: float | None = None
         collector_failures: int | None = None
@@ -79,15 +77,11 @@ class RegistryService:
             heartbeat = HeartbeatInfo(
                 timestamp=heartbeat_event.timestamp,
                 received_at=heartbeat_event.received_at,
-                software_version=(
-                    software_version if isinstance(software_version, str) else None
-                ),
+                software_version=(software_version if isinstance(software_version, str) else None),
                 collector_version=(
                     collector_version if isinstance(collector_version, str) else None
                 ),
-                collector_type=(
-                    collector_type if isinstance(collector_type, str) else None
-                ),
+                collector_type=(collector_type if isinstance(collector_type, str) else None),
                 schema_version=heartbeat_event.schema_version,
             )
             heartbeat_age = (now - heartbeat_event.timestamp).total_seconds()
@@ -101,9 +95,7 @@ class RegistryService:
         else:
             connectivity = Connectivity.ONLINE
 
-        system_event = await self._events.latest_event(
-            asset.fleet_id, SYSTEM_METRICS_EVENT_TYPE
-        )
+        system_event = await self._events.latest_event(asset.fleet_id, SYSTEM_METRICS_EVENT_TYPE)
         health = compute_health(
             self._settings,
             connectivity=connectivity,
@@ -122,8 +114,7 @@ class RegistryService:
             platform=asset.platform,
             os=asset.os,
             software_version=(
-                (heartbeat.software_version if heartbeat else None)
-                or asset.software_version
+                (heartbeat.software_version if heartbeat else None) or asset.software_version
             ),
             host_fleet_id=asset.host_fleet_id,
             deployment_role=asset.deployment_role,

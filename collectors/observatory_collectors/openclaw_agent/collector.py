@@ -73,9 +73,7 @@ class AgentTelemetry:
             "model": state.get("model") or self._model_fallback,
             "claude_code": probes.probe_claude_code(),
             "runtime_version": probes.probe_runtime_version(),
-            "process_uptime_seconds": probes.probe_process_uptime(
-                self._process_pattern
-            ),
+            "process_uptime_seconds": probes.probe_process_uptime(self._process_pattern),
         }
         return [("agent_status", payload, AGENT_STATUS_SCHEMA)]
 
@@ -137,14 +135,10 @@ def build_runner(config: CollectorConfig, env: dict[str, str] | None = None) -> 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Observatory OpenClaw agent collector")
-    parser.add_argument(
-        "--once", action="store_true", help="run all tasks once and exit"
-    )
+    parser.add_argument("--once", action="store_true", help="run all tasks once and exit")
     args = parser.parse_args(argv)
 
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s"
-    )
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     config = CollectorConfig.from_env(default_collector_name="openclaw-agent")
     runner = build_runner(config)
     if args.once:

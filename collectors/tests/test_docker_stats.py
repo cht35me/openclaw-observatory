@@ -32,8 +32,12 @@ INSPECT = json.dumps(
 STATS = "\n".join(
     [
         json.dumps(
-            {"Name": "observatory-backend", "CPUPerc": "1.25%", "MemPerc": "3.50%",
-             "MemUsage": "132MiB / 3.7GiB"}
+            {
+                "Name": "observatory-backend",
+                "CPUPerc": "1.25%",
+                "MemPerc": "3.50%",
+                "MemUsage": "132MiB / 3.7GiB",
+            }
         ),
     ]
 )
@@ -42,7 +46,9 @@ STATS = "\n".join(
 def test_inspect_parsing_and_summary() -> None:
     containers = docker_stats.parse_inspect_output(INSPECT)
     assert [c["name"] for c in containers] == [
-        "observatory-backend", "clickhouse", "idle-helper",
+        "observatory-backend",
+        "clickhouse",
+        "idle-helper",
     ]
     summary = docker_stats.summarize(containers)
     assert summary == {

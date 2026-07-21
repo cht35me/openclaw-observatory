@@ -35,6 +35,7 @@ def _snapshot(**overrides) -> MonitorSnapshot:
 # Pure rendering
 # --------------------------------------------------------------------- #
 
+
 def test_formatters() -> None:
     assert _fmt_percent(27.71) == "27.7%"
     assert _fmt_percent(None) == "—"
@@ -188,6 +189,7 @@ def test_render_escapes_telemetry_text() -> None:
 # --------------------------------------------------------------------- #
 # Route (wired app, in-memory storage, seeded registry)
 # --------------------------------------------------------------------- #
+
 
 def test_monitor_route_serves_html_without_auth(client: TestClient) -> None:
     """/monitor mirrors /health exposure (SD-020): network-boundary protected."""

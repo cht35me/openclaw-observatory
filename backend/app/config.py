@@ -117,9 +117,7 @@ class Settings(BaseSettings):
                 keys = value if isinstance(value, list) else [value]
                 if not all(isinstance(k, str) for k in keys):
                     raise ValueError("API_KEYS JSON values must be strings or string arrays")
-                pairs.extend(
-                    (collector_id.strip(), k.strip()) for k in keys
-                )
+                pairs.extend((collector_id.strip(), k.strip()) for k in keys)
         else:
             for entry in raw.split(","):
                 entry = entry.strip()
@@ -138,9 +136,7 @@ class Settings(BaseSettings):
         seen: dict[str, str] = {}
         for collector_id, key in bindings:
             if key in seen and seen[key] != collector_id:
-                raise ValueError(
-                    "API_KEYS binds one key to multiple collector identities (SD-017)"
-                )
+                raise ValueError("API_KEYS binds one key to multiple collector identities (SD-017)")
             seen[key] = collector_id
         return bindings
 

@@ -1,0 +1,25 @@
+# Repository-wide tooling configuration.
+#
+# This file intentionally carries no [project] section: the backend installs
+# from backend/requirements*.txt (pinned, docs/security.md §8) and the
+# collectors are stdlib-only (SD-019). It exists so one Ruff configuration
+# governs backend/app, backend/tests, and collectors alike — Ruff resolves
+# the nearest config upward from each checked file, and the repository root
+# is the only common ancestor. Rationale: docs/release-process.md §6.
+
+[tool.ruff]
+# Matches the prevailing code style (~88–100 columns across app and tests).
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+# E/W: pycodestyle · F: Pyflakes · I: import order · UP: modernize · B: bugbear
+select = ["E", "F", "I", "W", "UP", "B"]
+
+[tool.ruff.lint.isort]
+# First-party roots: the backend package and the collectors package.
+known-first-party = ["app", "tests", "observatory_collectors"]
+
+# [tool.ruff.format] intentionally left at defaults: double quotes, spaces,
+# magic trailing comma — matching the existing codebase. Docstring code
+# formatting stays off so documented examples remain byte-for-byte stable.

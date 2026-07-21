@@ -145,9 +145,7 @@ def test_registry_versioned_upsert_roundtrip() -> None:
         assert stored.tags == ("lab",)
 
         # Update: new versioned row must supersede the old one under FINAL.
-        updated = stored.model_copy(
-            update={"nickname": "Testy", "status": LifecycleStatus.PAUSED}
-        )
+        updated = stored.model_copy(update={"nickname": "Testy", "status": LifecycleStatus.PAUSED})
         await registry.upsert_asset(updated)
         stored = await registry.get_asset(fleet_id)
         assert stored.nickname == "Testy"
