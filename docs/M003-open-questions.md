@@ -168,18 +168,48 @@ The Observatory Monitor is a server-rendered HTML page at `GET /monitor`
 *inside the backend* (stdlib rendering + `html.escape`, meta-refresh, no
 JS/build toolchain), exposed like `/health`//`/metrics`: no API key,
 network-boundary protection (loopback/tailnet only). Alternatives (separate
-stdlib service, static generator) and the exposure rationale are recorded in
+stdlib service, static generator), the exposure rationale, and the explicit
+rendering rationale (server-rendered 10 s polling vs. a JS/WebSocket client
+— documented at Gate G3 review) are recorded in
 [SD-020](decisions/SD-020-server-rendered-monitor-in-backend.md).
 
-### 9. Token usage on the monitor — OPEN, placeholder shown
+The monitor header identifies the running deployment (Gate G3 review
+request): Observatory version, git commit of the running checkout (read
+stdlib-only from `.git`, overridable via `GIT_COMMIT` for non-checkout
+deployments; `unknown` when neither exists), and the active mission
+(agent-reported, falling back to the backend's mission projection).
+
+### 9. Token usage on the monitor — placeholder shown, future ownership ruled
 
 M003 asks for “token usage where available.” The OpenClaw runtime does not
 expose token consumption in any machine-readable file the agent collector may
 read cheaply (session logs are internal, and scraping them would couple the
 collector to runtime internals). The monitor shows an explicit
-“n/a — not yet collected” placeholder; a proper source (agent state file
-field maintained by the runtime, or a future usage API) is deferred — to be
-picked up with the AI-usage collector milestone (roadmap).
+“n/a — not yet collected” placeholder for M003.
+
+**Intended future ownership** (documented at Gate G3 review so the
+architectural responsibility is clear):
+
+- **Primary source: the OpenClaw runtime.** Token usage is a property of
+  the agent's own execution, so the runtime is the authority. The intended
+  path is a machine-readable usage field in the agent state file
+  (`~/.config/observatory/agent-state.json`, §10) — or a local runtime
+  usage API if one appears — maintained by the runtime/agent workflow, not
+  scraped from internal session logs.
+- **Transport: the existing agent collector.** It already owns the agent
+  state file and reports through the authenticated push path (SD-002,
+  SD-017); token usage becomes one more field on `agent_status`. No new
+  collector, credentials, or service is planned for the *local* metric.
+- **Claude API accounting is a cross-check, not the local source.** Provider
+  billing/usage APIs are account-wide, delayed, and need provider
+  credentials that do not belong on fleet nodes. If billing-grade
+  reconciliation is ever wanted, it lands in the *central* Observatory as
+  part of the AI-usage collector milestone (roadmap) — a separate,
+  central-side concern.
+
+The placeholder is removed when the runtime-maintained field exists; the
+monitor and backend need no structural change (the `agent_status` payload is
+schema-flexible).
 
 ### 10. RPSG01 deployment specifics (real installation, supervisor-authorized)
 

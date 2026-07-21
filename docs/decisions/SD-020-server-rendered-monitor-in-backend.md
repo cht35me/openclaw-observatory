@@ -32,6 +32,42 @@ Three placements were considered:
 3. *Static file generator on a timer.* Stale-by-design and still needs a web
    server. Rejected.
 
+## Rendering rationale: server-rendered HTML + 10 s polling, no JS/WebSockets
+
+Recorded explicitly at Gate G3 review (supervisor request) so future
+contributors understand this was a deliberate architectural choice, not a
+shortcut. A JavaScript client with WebSocket/SSE push was considered and
+rejected for this monitor:
+
+- **Role: emergency instrument panel, not a frontend.** The monitor exists
+  to answer “what is the state of this deployment *right now*?” — including
+  while things are degrading. It must work from any browser (text browsers
+  included), with no client state, no reconnect logic, and nothing cached
+  between loads. The rich interactive UI remains the central React SPA
+  (SD-006); this page deliberately does not compete with it.
+- **Operational reliability.** A full-page meta refresh is self-healing by
+  construction: every 10 s the browser re-requests everything, so a dropped
+  connection, a backend restart, or a half-rendered page corrects itself on
+  the next tick. WebSocket implementations must hand-roll reconnect,
+  backoff, and staleness detection — all failure modes the monitor is
+  supposed to help diagnose, not suffer from.
+- **Zero JS dependencies.** No build toolchain, no npm supply chain, no
+  bundler config to rot on an ARM SBC. The stdlib-only ethos matches the
+  collectors (SD-019) and keeps the page auditable in one file.
+- **Simplicity matches the data's cadence.** Telemetry arrives on ~30 s
+  collector intervals; sub-second push would fabricate a freshness the
+  data does not have. 10 s polling costs a few read-model queries per
+  refresh — negligible for a single-operator loopback/tailnet page.
+- **Security surface.** No JavaScript means telemetry text can never
+  execute; combined with `html.escape` on every dynamic value
+  (docs/security.md §9) the page renders hostile telemetry inert. A JS
+  client consuming a push channel would reopen exactly that class of risk.
+
+If a future milestone genuinely needs live push (sub-second updates,
+multi-operator dashboards), that belongs to the central frontend milestone
+(SD-006) and its auth layer — a superseding decision, not an edit to this
+page.
+
 ## Exposure rationale
 
 The read APIs require API keys (docs/security.md §3), but a browser page
