@@ -44,9 +44,7 @@ def _detector(now: datetime):
     registry = InMemoryRegistryStorage()
     metrics = AppMetrics.create(version="test")
     clock = {"now": now}
-    detector = OfflineDetector(
-        settings, registry, events, metrics, now_fn=lambda: clock["now"]
-    )
+    detector = OfflineDetector(settings, registry, events, metrics, now_fn=lambda: clock["now"])
     return detector, events, registry, metrics, clock
 
 
@@ -104,14 +102,20 @@ def test_restarting_collector_generates_online_recovery_event() -> None:
         assert online[0].payload["previous"] == "offline"
 
         registry_metrics = metrics.registry
-        assert registry_metrics.get_sample_value(
-            "observatory_offline_transitions_total",
-            {"collector_id": "RPSG01", "direction": "offline"},
-        ) == 1.0
-        assert registry_metrics.get_sample_value(
-            "observatory_offline_transitions_total",
-            {"collector_id": "RPSG01", "direction": "online"},
-        ) == 1.0
+        assert (
+            registry_metrics.get_sample_value(
+                "observatory_offline_transitions_total",
+                {"collector_id": "RPSG01", "direction": "offline"},
+            )
+            == 1.0
+        )
+        assert (
+            registry_metrics.get_sample_value(
+                "observatory_offline_transitions_total",
+                {"collector_id": "RPSG01", "direction": "online"},
+            )
+            == 1.0
+        )
 
     asyncio.run(scenario())
 
@@ -131,12 +135,10 @@ def test_never_seen_assets_count_as_unknown_without_events() -> None:
         assert registry_metrics.get_sample_value(
             "observatory_fleet_registered_assets", {}
         ) == float(len(SEED_ASSETS))
-        assert registry_metrics.get_sample_value(
-            "observatory_fleet_unknown_assets", {}
-        ) == float(len(SEED_ASSETS))
-        assert registry_metrics.get_sample_value(
-            "observatory_fleet_active_assets", {}
-        ) == 0.0
+        assert registry_metrics.get_sample_value("observatory_fleet_unknown_assets", {}) == float(
+            len(SEED_ASSETS)
+        )
+        assert registry_metrics.get_sample_value("observatory_fleet_active_assets", {}) == 0.0
 
     asyncio.run(scenario())
 
@@ -147,22 +149,14 @@ def test_gauges_reflect_mixed_connectivity() -> None:
         await seed_registry(registry, now_fn=lambda: NOW)
         # RPSG01 fresh, A001 stale, OBLN01 never seen.
         await events.insert_event(_heartbeat_event("RPSG01", NOW))
-        await events.insert_event(
-            _heartbeat_event("A001", NOW - timedelta(seconds=600))
-        )
+        await events.insert_event(_heartbeat_event("A001", NOW - timedelta(seconds=600)))
 
         await detector.run_once()
 
         registry_metrics = metrics.registry
-        assert registry_metrics.get_sample_value(
-            "observatory_fleet_active_assets", {}
-        ) == 1.0
-        assert registry_metrics.get_sample_value(
-            "observatory_fleet_offline_assets", {}
-        ) == 1.0
-        assert registry_metrics.get_sample_value(
-            "observatory_fleet_unknown_assets", {}
-        ) == 1.0
+        assert registry_metrics.get_sample_value("observatory_fleet_active_assets", {}) == 1.0
+        assert registry_metrics.get_sample_value("observatory_fleet_offline_assets", {}) == 1.0
+        assert registry_metrics.get_sample_value("observatory_fleet_unknown_assets", {}) == 1.0
 
     asyncio.run(scenario())
 
@@ -173,9 +167,7 @@ def test_backend_self_heartbeat() -> None:
     async def scenario() -> None:
         settings = _settings()
         events = InMemoryEventStorage()
-        beat = BackendHeartbeat(
-            settings, events, uptime_fn=lambda: 42.0, now_fn=lambda: NOW
-        )
+        beat = BackendHeartbeat(settings, events, uptime_fn=lambda: 42.0, now_fn=lambda: NOW)
         event = await beat.beat_once()
         assert event.collector_id == "OBLN01"
         assert event.event_type == "heartbeat"

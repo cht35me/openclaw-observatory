@@ -79,9 +79,7 @@ async def ingest_event(
             "event rejected by pipeline handler",
             extra={"collector_id": inbound.collector_id},
         )
-        raise HTTPException(
-            status_code=rejection.status_code, detail=rejection.detail
-        ) from None
+        raise HTTPException(status_code=rejection.status_code, detail=rejection.detail) from None
 
     event = Event.from_ingest(inbound)
     try:

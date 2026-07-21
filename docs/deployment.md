@@ -25,8 +25,11 @@ VPS Production (monitored, backed up, rollback-ready)
    through a reviewed PR ([AGENTS.md](../AGENTS.md)).
 3. **Human review and merge:** supervisor approval is the release gate; merges are
    performed by or under the authority of a human ([MISSION.md](../MISSION.md)).
-4. **Testing:** unit/integration tests run before PR (locally at first; CI in a later
-   phase per [roadmap.md](roadmap.md)). A change without stated validation does not ship.
+4. **Testing:** unit/integration tests run before PR locally **and** in CI
+   ([`.github/workflows/ci.yml`](../.github/workflows/ci.yml), Phase 2.1): backend,
+   collector, and ClickHouse integration suites plus Ruff are required status checks on
+   `main` — see [release-process.md](release-process.md). A change without stated
+   validation does not ship.
 5. **VPS staging deployment:** merged code deploys first to a staging instance on the
    VPS (separate containers/ports/data), soaks with real-but-noncritical telemetry, and
    is verified against a checklist.
@@ -148,4 +151,5 @@ version + commit; staging and production run the *same image*.
 ---
 
 Related: [architecture.md](architecture.md) · [security.md](security.md) ·
-[roadmap.md](roadmap.md) · [requirements.md](requirements.md)
+[roadmap.md](roadmap.md) · [requirements.md](requirements.md) ·
+[release-process.md](release-process.md)

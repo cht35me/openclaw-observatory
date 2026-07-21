@@ -43,8 +43,12 @@ def _http_error(code: int) -> urllib.error.HTTPError:
 def test_successful_submission_sends_identity_and_key() -> None:
     opener = FakeOpener(["ok"])
     client = ObservatoryClient(CONFIG, sleep_fn=lambda s: None, opener=opener)
-    assert client.submit_event("heartbeat", {"collector_type": "raspberry",
-                                             "collector_version": "1.0.0"}) is True
+    assert (
+        client.submit_event(
+            "heartbeat", {"collector_type": "raspberry", "collector_version": "1.0.0"}
+        )
+        is True
+    )
     assert client.failures_total == 0
 
     request = opener.requests[0]

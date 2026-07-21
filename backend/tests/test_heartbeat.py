@@ -60,9 +60,7 @@ def test_valid_heartbeat_accepted_and_measured(client: TestClient) -> None:
 
 def test_heartbeat_reports_collector_failures_gauge(client: TestClient) -> None:
     body = _heartbeat(payload={"failures_total": 7})
-    response = client.post(
-        "/api/v1/events", json=body, headers=auth_headers("test-key-rpsg01")
-    )
+    response = client.post("/api/v1/events", json=body, headers=auth_headers("test-key-rpsg01"))
     assert response.status_code == 202
     assert (
         _sample(
@@ -79,26 +77,18 @@ def test_malformed_heartbeat_rejected(client: TestClient) -> None:
     missing = _heartbeat(payload={})
     del missing["payload"]["collector_type"]
     del missing["payload"]["collector_version"]
-    response = client.post(
-        "/api/v1/events", json=missing, headers=auth_headers("test-key-rpsg01")
-    )
+    response = client.post("/api/v1/events", json=missing, headers=auth_headers("test-key-rpsg01"))
     assert response.status_code == 422
 
     extra = _heartbeat(payload={"surprise": True})
-    response = client.post(
-        "/api/v1/events", json=extra, headers=auth_headers("test-key-rpsg01")
-    )
+    response = client.post("/api/v1/events", json=extra, headers=auth_headers("test-key-rpsg01"))
     assert response.status_code == 422
 
 
 def test_heartbeat_future_timestamp_rejected(client: TestClient) -> None:
     """Replay protection: forged future timestamps cannot fake liveness."""
-    body = _heartbeat(
-        timestamp=(datetime.now(UTC) + timedelta(minutes=10)).isoformat()
-    )
-    response = client.post(
-        "/api/v1/events", json=body, headers=auth_headers("test-key-rpsg01")
-    )
+    body = _heartbeat(timestamp=(datetime.now(UTC) + timedelta(minutes=10)).isoformat())
+    response = client.post("/api/v1/events", json=body, headers=auth_headers("test-key-rpsg01"))
     assert response.status_code == 422
 
 
@@ -116,9 +106,7 @@ def test_heartbeat_for_unregistered_identity_rejected(client: TestClient) -> Non
     assert response.status_code == 403
 
     # ... and nothing appeared in the registry.
-    assert (
-        client.get("/api/v1/fleet/demo", headers=auth_headers()).status_code == 404
-    )
+    assert client.get("/api/v1/fleet/demo", headers=auth_headers()).status_code == 404
 
 
 def test_heartbeat_identity_spoofing_rejected(client: TestClient) -> None:

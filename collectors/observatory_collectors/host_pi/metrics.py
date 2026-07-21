@@ -26,6 +26,7 @@ THERMAL_ZONE = Path("/sys/class/thermal/thermal_zone0/temp")
 # Pure parsers (tested with canned /proc contents)
 # --------------------------------------------------------------------- #
 
+
 def parse_cpu_times(stat_text: str) -> tuple[int, int] | None:
     """Return ``(idle, total)`` jiffies from ``/proc/stat``'s ``cpu`` line."""
     for line in stat_text.splitlines():
@@ -112,6 +113,7 @@ def parse_default_gateway(route_text: str) -> str | None:
 # --------------------------------------------------------------------- #
 # I/O wrappers (fail soft)
 # --------------------------------------------------------------------- #
+
 
 def _read(path: Path) -> str | None:
     try:

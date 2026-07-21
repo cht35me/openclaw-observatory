@@ -20,6 +20,12 @@ M003
   PR titles (e.g., `M001: establish OpenClaw Observatory foundation`), and mission records.
 - If mission volume ever exceeds three digits, the format extends naturally (`M1000`);
   padding is a readability convention, not a hard limit.
+- **Point-release missions** (supervisor-introduced with M003.5, Phase 2.1) append a
+  single dotted numeric suffix to an existing mission ID: `M003.5`. They denote
+  supervisor-inserted follow-up milestones between planned missions. Exactly one
+  suffix level is allowed (`M003.5.1` is invalid), and the suffix carries no ordering
+  semantics in tooling — point IDs are plain, unique mission identifiers
+  (pattern: `^M[0-9]{3,}(\.[0-9]+)?$`).
 
 ## Mission Assignment
 

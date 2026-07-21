@@ -147,8 +147,7 @@ class _ClickHouseConnection:
     ) -> None:
         if not _IDENTIFIER_RE.match(settings.clickhouse_database):
             raise ValueError(
-                "CLICKHOUSE_DATABASE must be a plain identifier "
-                "(letters, digits, underscores)."
+                "CLICKHOUSE_DATABASE must be a plain identifier (letters, digits, underscores)."
             )
         self._settings = settings
         self._database = settings.clickhouse_database
@@ -250,9 +249,7 @@ class ClickHouseEventStorage(_ClickHouseConnection, EventStorage):
             )
             applied = {
                 row[0]
-                for row in client.query(
-                    f"SELECT name FROM {self._migrations_table}"
-                ).result_rows
+                for row in client.query(f"SELECT name FROM {self._migrations_table}").result_rows
             }
             for name, statements in migrations:
                 if name in applied:
@@ -278,13 +275,9 @@ class ClickHouseEventStorage(_ClickHouseConnection, EventStorage):
         migrations: list[tuple[str, list[str]]] = []
         for path in sorted(self._migrations_dir.glob("*.sql")):
             sql = path.read_text(encoding="utf-8").replace("{database}", self._database)
-            lines = [
-                line for line in sql.splitlines() if not line.lstrip().startswith("--")
-            ]
+            lines = [line for line in sql.splitlines() if not line.lstrip().startswith("--")]
             statements = [
-                statement.strip()
-                for statement in "\n".join(lines).split(";")
-                if statement.strip()
+                statement.strip() for statement in "\n".join(lines).split(";") if statement.strip()
             ]
             if statements:
                 migrations.append((path.name, statements))
@@ -308,9 +301,7 @@ class ClickHouseEventStorage(_ClickHouseConnection, EventStorage):
         ]
         await self._run(
             "insert",
-            lambda client: client.insert(
-                self._table, [row], column_names=list(_EVENT_COLUMNS)
-            ),
+            lambda client: client.insert(self._table, [row], column_names=list(_EVENT_COLUMNS)),
         )
 
     async def query_events(
@@ -332,9 +323,7 @@ class ClickHouseEventStorage(_ClickHouseConnection, EventStorage):
             f"SELECT {', '.join(_EVENT_COLUMNS)} FROM {self._table} "
             f"{where} ORDER BY received_at DESC LIMIT {{limit:UInt32}}"
         )
-        result = await self._run(
-            "query", lambda client: client.query(query, parameters=parameters)
-        )
+        result = await self._run("query", lambda client: client.query(query, parameters=parameters))
         return [self._row_to_event(row) for row in result.result_rows]
 
     # ------------------------------------------------------------------ #
@@ -400,9 +389,7 @@ class ClickHouseRegistryStorage(_ClickHouseConnection, RegistryStorage):
         ]
         await self._run(
             "registry_upsert",
-            lambda client: client.insert(
-                self._table, [row], column_names=list(_REGISTRY_COLUMNS)
-            ),
+            lambda client: client.insert(self._table, [row], column_names=list(_REGISTRY_COLUMNS)),
         )
 
     async def get_asset(self, fleet_id: str) -> FleetAsset | None:
@@ -418,10 +405,7 @@ class ClickHouseRegistryStorage(_ClickHouseConnection, RegistryStorage):
         return self._row_to_asset(rows[0]) if rows else None
 
     async def list_assets(self) -> list[FleetAsset]:
-        query = (
-            f"SELECT {', '.join(_REGISTRY_COLUMNS)} FROM {self._table} FINAL "
-            "ORDER BY fleet_id"
-        )
+        query = f"SELECT {', '.join(_REGISTRY_COLUMNS)} FROM {self._table} FINAL ORDER BY fleet_id"
         result = await self._run("registry_list", lambda client: client.query(query))
         return [self._row_to_asset(row) for row in result.result_rows]
 
@@ -505,9 +489,7 @@ class ClickHouseMissionStorage(_ClickHouseConnection, MissionStorage):
         ]
         await self._run(
             "mission_upsert",
-            lambda client: client.insert(
-                self._table, [row], column_names=list(_MISSION_COLUMNS)
-            ),
+            lambda client: client.insert(self._table, [row], column_names=list(_MISSION_COLUMNS)),
         )
 
     async def get_mission(self, mission_id: str) -> MissionRecord | None:
@@ -523,10 +505,7 @@ class ClickHouseMissionStorage(_ClickHouseConnection, MissionStorage):
         return self._row_to_mission(rows[0]) if rows else None
 
     async def list_missions(self) -> list[MissionRecord]:
-        query = (
-            f"SELECT {', '.join(_MISSION_COLUMNS)} FROM {self._table} FINAL "
-            "ORDER BY mission_id"
-        )
+        query = f"SELECT {', '.join(_MISSION_COLUMNS)} FROM {self._table} FINAL ORDER BY mission_id"
         result = await self._run("mission_list", lambda client: client.query(query))
         return [self._row_to_mission(row) for row in result.result_rows]
 

@@ -86,17 +86,11 @@ async def build_snapshot(
 
     # The host node this deployment runs on: prefer the backend asset's
     # host_fleet_id relationship; fall back to the first registered node.
-    backend_view = next(
-        (a for a in assets if a.fleet_id == settings.fleet_id), None
-    )
+    backend_view = next((a for a in assets if a.fleet_id == settings.fleet_id), None)
     host_id = backend_view.host_fleet_id if backend_view else None
     if host_id is None:
-        host_id = next(
-            (a.fleet_id for a in assets if a.asset_type is AssetType.NODE), None
-        )
-    agent_id = next(
-        (a.fleet_id for a in assets if a.asset_type is AssetType.AGENT), None
-    )
+        host_id = next((a.fleet_id for a in assets if a.asset_type is AssetType.NODE), None)
+    agent_id = next((a.fleet_id for a in assets if a.asset_type is AssetType.AGENT), None)
 
     host_metrics = host_metrics_at = docker = None
     if host_id is not None:
@@ -137,6 +131,7 @@ async def build_snapshot(
 # --------------------------------------------------------------------- #
 # Pure rendering helpers
 # --------------------------------------------------------------------- #
+
 
 def _esc(value: Any) -> str:
     """Escape any value for inert HTML rendering (security.md §9)."""
@@ -223,6 +218,7 @@ def _bool_badge(value: Any, true_label: str = "yes", false_label: str = "no") ->
 # Section renderers
 # --------------------------------------------------------------------- #
 
+
 def _render_agent_section(snapshot: MonitorSnapshot) -> str:
     status = snapshot.agent_status or {}
     claude = status.get("claude_code") or {}
@@ -247,9 +243,7 @@ def _render_agent_section(snapshot: MonitorSnapshot) -> str:
         # reports it; Claude API accounting stays a central-side cross-check.
         ("Token usage", '<span class="muted">n/a — not yet collected</span>'),
     ]
-    body = "".join(
-        f"<tr><th>{_esc(label)}</th><td>{value}</td></tr>" for label, value in rows
-    )
+    body = "".join(f"<tr><th>{_esc(label)}</th><td>{value}</td></tr>" for label, value in rows)
     return f'<section><h2>OpenClaw Agent</h2><table class="kv">{body}</table></section>'
 
 
@@ -312,14 +306,15 @@ def _render_host_section(snapshot: MonitorSnapshot) -> str:
             "Network",
             _bool_badge(network.get("online"), "online", "offline")
             + f" {_dash(network.get('ip_address'))}"
-            + (f" ({_esc(network['default_interface'])})"
-               if network.get("default_interface") else ""),
+            + (
+                f" ({_esc(network['default_interface'])})"
+                if network.get("default_interface")
+                else ""
+            ),
         ),
         ("Reported", _fmt_age(snapshot.host_metrics_at, snapshot.generated_at)),
     ]
-    body = "".join(
-        f"<tr><th>{_esc(label)}</th><td>{value}</td></tr>" for label, value in rows
-    )
+    body = "".join(f"<tr><th>{_esc(label)}</th><td>{value}</td></tr>" for label, value in rows)
     return f'<section><h2>Host</h2><table class="kv">{body}</table></section>'
 
 
@@ -372,7 +367,7 @@ def _render_fleet_section(snapshot: MonitorSnapshot) -> str:
             f"<td>{_esc(a.role)}</td>"
             f"<td>{_connectivity_badge(a.connectivity)}</td>"
             f"<td>{_health_badge(a.health)}</td>"
-            f"<td>{_fmt_age(a.last_heartbeat.timestamp if a.last_heartbeat else None, snapshot.generated_at)}</td>"
+            f"<td>{_fmt_age(a.last_heartbeat.timestamp if a.last_heartbeat else None, snapshot.generated_at)}</td>"  # noqa: E501
             f"<td>{_dash(a.last_heartbeat.collector_version if a.last_heartbeat else None)}</td>"
             "</tr>"
             for a in snapshot.assets

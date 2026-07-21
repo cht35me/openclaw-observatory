@@ -77,9 +77,7 @@ def test_non_object_payload_rejected(client: TestClient) -> None:
     assert response.status_code == 422
 
 
-def test_storage_failure_returns_503(
-    client: TestClient, storage: InMemoryEventStorage
-) -> None:
+def test_storage_failure_returns_503(client: TestClient, storage: InMemoryEventStorage) -> None:
     storage.fail = True
     response = client.post("/api/v1/events", json=VALID_EVENT, headers=auth_headers())
     assert response.status_code == 503

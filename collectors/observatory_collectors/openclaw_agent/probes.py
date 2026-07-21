@@ -42,6 +42,7 @@ _MAX_FIELD_LENGTH = 512
 # Pure parsers
 # --------------------------------------------------------------------- #
 
+
 def parse_state_document(text: str) -> dict[str, Any]:
     """Validate the agent state JSON into a bounded, string-typed dict."""
     try:
@@ -88,6 +89,7 @@ def process_uptime_seconds(
 # I/O wrappers (fail soft)
 # --------------------------------------------------------------------- #
 
+
 def read_state_file(path: str | None) -> dict[str, Any]:
     if not path:
         return {}
@@ -103,7 +105,10 @@ def _cli_version(binary: str) -> str | None:
     try:
         result = subprocess.run(
             [binary, "--version"],
-            capture_output=True, text=True, timeout=_CLI_TIMEOUT, check=False,
+            capture_output=True,
+            text=True,
+            timeout=_CLI_TIMEOUT,
+            check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -133,7 +138,10 @@ def probe_process_uptime(pattern: str = "openclaw") -> float | None:
     try:
         result = subprocess.run(
             ["pgrep", "-o", "-f", pattern],
-            capture_output=True, text=True, timeout=_CLI_TIMEOUT, check=False,
+            capture_output=True,
+            text=True,
+            timeout=_CLI_TIMEOUT,
+            check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -147,6 +155,4 @@ def probe_process_uptime(pattern: str = "openclaw") -> float | None:
         return None
     system_uptime = float(uptime_text.split()[0])
     hertz = os.sysconf("SC_CLK_TCK")
-    return process_uptime_seconds(
-        parse_starttime_ticks(stat_text), system_uptime, hertz
-    )
+    return process_uptime_seconds(parse_starttime_ticks(stat_text), system_uptime, hertz)

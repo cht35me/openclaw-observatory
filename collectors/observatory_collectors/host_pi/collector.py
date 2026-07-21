@@ -94,14 +94,10 @@ def build_runner(config: CollectorConfig) -> CollectorRunner:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Observatory Raspberry Pi collector")
-    parser.add_argument(
-        "--once", action="store_true", help="run all tasks once and exit"
-    )
+    parser.add_argument("--once", action="store_true", help="run all tasks once and exit")
     args = parser.parse_args(argv)
 
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s"
-    )
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     config = CollectorConfig.from_env(default_collector_name="host-pi")
     runner = build_runner(config)
     if args.once:

@@ -230,8 +230,16 @@ cd backend
 python3 -m venv .venv
 .venv/bin/pip install -r requirements-dev.txt
 .venv/bin/python -m pytest            # ClickHouse integration tests auto-skip if no server
+.venv/bin/python -m pytest ../collectors                      # stdlib-only collector suite
+.venv/bin/ruff check app tests ../collectors                  # lint (config: root pyproject.toml)
+.venv/bin/ruff format --check app tests ../collectors
 .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000   # run against env config
 ```
+
+Every PR must pass the [CI workflow](.github/workflows/ci.yml) (backend,
+collectors, ClickHouse integration, Ruff) — the same commands, enforced as
+required status checks on `main`. See
+[docs/release-process.md](docs/release-process.md).
 
 The test suite runs entirely offline using an in-memory storage backend; tests in
 `tests/test_clickhouse_integration.py` execute only when a ClickHouse server is
@@ -315,6 +323,7 @@ M001. See [docs/deployment.md](docs/deployment.md).
 | [docs/roadmap.md](docs/roadmap.md) | Staged milestones with dependencies and gates |
 | [docs/security.md](docs/security.md) | Threat model and security strategy |
 | [docs/deployment.md](docs/deployment.md) | Deployment lifecycle and operations |
+| [docs/release-process.md](docs/release-process.md) | Release/deployment/rollback checklists, CI required checks, tagging |
 
 ---
 

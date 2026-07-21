@@ -69,9 +69,7 @@ def detect_git_commit(start: Path | None = None) -> str | None:
                 content = git_dir.read_text(encoding="utf-8").strip()
                 if not content.startswith(_GITDIR_PREFIX):
                     return None
-                git_dir = (
-                    candidate / content[len(_GITDIR_PREFIX):].strip()
-                ).resolve()
+                git_dir = (candidate / content[len(_GITDIR_PREFIX) :].strip()).resolve()
             if not git_dir.is_dir():
                 continue
             head_file = git_dir / "HEAD"
@@ -81,7 +79,7 @@ def detect_git_commit(start: Path | None = None) -> str | None:
         except OSError:
             return None
         if head.startswith(_HEAD_REF_PREFIX):
-            return _resolve_ref(git_dir, head[len(_HEAD_REF_PREFIX):].strip())
+            return _resolve_ref(git_dir, head[len(_HEAD_REF_PREFIX) :].strip())
         return head or None  # detached HEAD stores the SHA directly
     return None
 

@@ -63,17 +63,13 @@ class EventStorage(ABC):
         verification tooling); richer querying arrives with later missions.
         """
 
-    async def latest_event(
-        self, collector_id: str, event_type: str
-    ) -> Event | None:
+    async def latest_event(self, collector_id: str, event_type: str) -> Event | None:
         """Return the most recent event of ``event_type`` for one collector.
 
         Default implementation on top of :meth:`query_events`; backends may
         override with a more efficient query.
         """
-        events = await self.query_events(
-            collector_id=collector_id, event_type=event_type, limit=1
-        )
+        events = await self.query_events(collector_id=collector_id, event_type=event_type, limit=1)
         return events[0] if events else None
 
 

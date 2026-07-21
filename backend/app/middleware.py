@@ -92,9 +92,7 @@ class RequestSizeLimitMiddleware:
             await self._reject(send)
 
     async def _reject(self, send: Send) -> None:
-        start, body = _json_response_messages(
-            413, {"detail": "Request body too large."}
-        )
+        start, body = _json_response_messages(413, {"detail": "Request body too large."})
         await send(start)
         await send(body)
 
@@ -162,9 +160,9 @@ class RequestContextMiddleware:
         self.metrics.http_requests_total.labels(
             method=method, path=path_label, status=str(status_code)
         ).inc()
-        self.metrics.http_request_duration_seconds.labels(
-            method=method, path=path_label
-        ).observe(duration)
+        self.metrics.http_request_duration_seconds.labels(method=method, path=path_label).observe(
+            duration
+        )
 
         log_extra = {
             "request_id": request_id,

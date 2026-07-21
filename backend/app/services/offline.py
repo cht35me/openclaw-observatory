@@ -86,13 +86,21 @@ class OfflineDetector:
                 continue
             if state is Connectivity.OFFLINE:
                 await self._emit_transition(
-                    asset.fleet_id, OFFLINE_EVENT_TYPE, previous, state,
-                    last_heartbeat, now,
+                    asset.fleet_id,
+                    OFFLINE_EVENT_TYPE,
+                    previous,
+                    state,
+                    last_heartbeat,
+                    now,
                 )
             elif state is Connectivity.ONLINE:
                 await self._emit_transition(
-                    asset.fleet_id, ONLINE_EVENT_TYPE, previous, state,
-                    last_heartbeat, now,
+                    asset.fleet_id,
+                    ONLINE_EVENT_TYPE,
+                    previous,
+                    state,
+                    last_heartbeat,
+                    now,
                 )
 
         self._metrics.fleet_registered_assets.set(len(assets))
@@ -100,9 +108,7 @@ class OfflineDetector:
         self._metrics.fleet_offline_assets.set(counts[Connectivity.OFFLINE])
         self._metrics.fleet_unknown_assets.set(counts[Connectivity.UNKNOWN])
 
-    async def _evaluate(
-        self, fleet_id: str, now: datetime
-    ) -> tuple[Connectivity, datetime | None]:
+    async def _evaluate(self, fleet_id: str, now: datetime) -> tuple[Connectivity, datetime | None]:
         heartbeat = await self._events.latest_event(fleet_id, HEARTBEAT_EVENT_TYPE)
         if heartbeat is None:
             return Connectivity.UNKNOWN, None

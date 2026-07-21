@@ -1,0 +1,127 @@
+# Continuous Integration — Mission M003.5 §1 (Phase 2.1, docs/roadmap.md).
+#
+# Four required checks (branch protection lists the job names below):
+#   Backend unit tests · Collector tests · ClickHouse integration tests ·
+#   Ruff lint & format
+#
+# Conventions:
+# - Python 3.13 everywhere (matches the RPSG01 deployment runtime).
+# - Backend pytest runs FROM backend/ (Settings resolves .env relative to
+#   the working directory; running from the repo root is unsupported).
+# - No network secrets: everything installs from public PyPI / Docker Hub.
+# - Runners are amd64; nothing here may assume the ARM64 dev host.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.13"
+
+jobs:
+  backend-tests:
+    name: Backend unit tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+      - name: Install backend (pinned dev requirements)
+        run: python -m pip install -r requirements-dev.txt
+      # The ClickHouse integration module skips itself here (no server);
+      # it runs for real in the dedicated job below.
+      - name: Run backend test suite
+        run: python -m pytest
+
+  collector-tests:
+    name: Collector tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: collectors
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      # Collectors are stdlib-only (SD-019): pytest is the only test dep.
+      # Keep the pin in sync with backend/requirements-dev.txt.
+      - name: Install pytest
+        run: python -m pip install "$(grep -E '^pytest==' ../backend/requirements-dev.txt)"
+      - name: Run collector test suite
+        run: python -m pytest
+
+  clickhouse-integration:
+    name: ClickHouse integration tests
+    runs-on: ubuntu-latest
+    services:
+      clickhouse:
+        # Same pinned image line as docker-compose.yml (security.md §8).
+        image: clickhouse/clickhouse-server:26.3.10
+        env:
+          CLICKHOUSE_DB: observatory
+          CLICKHOUSE_USER: observatory
+          CLICKHOUSE_PASSWORD: ci-integration-only # CI-local throwaway, not a secret
+        ports:
+          - 8123:8123
+        options: >-
+          --health-cmd "clickhouse-client --user observatory --password ci-integration-only --query 'SELECT 1'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      CLICKHOUSE_HOST: 127.0.0.1
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_USERNAME: observatory
+      CLICKHOUSE_PASSWORD: ci-integration-only
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+      - name: Install backend (pinned dev requirements)
+        run: python -m pip install -r requirements-dev.txt
+      # The integration module auto-skips when ClickHouse is unreachable
+      # (module-level skipif). In THIS job a skip means the service container
+      # failed, so the guard turns any skip — or an empty run — into a failure.
+      - name: Run ClickHouse integration tests (skips are failures here)
+        run: |
+          set -o pipefail
+          python -m pytest tests/test_clickhouse_integration.py -v -ra | tee pytest-clickhouse.log
+          if grep -qiE '\bskipped\b' pytest-clickhouse.log; then
+            echo '::error::ClickHouse integration tests were skipped — service container unreachable.'
+            exit 1
+          fi
+          grep -qE '[1-9][0-9]* passed' pytest-clickhouse.log
+
+  ruff:
+    name: Ruff lint & format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install Ruff (pinned in backend/requirements-dev.txt)
+        run: python -m pip install "$(grep -E '^ruff==' backend/requirements-dev.txt)"
+      - name: Ruff lint
+        run: ruff check backend/app backend/tests collectors
+      - name: Ruff format check
+        run: ruff format --check backend/app backend/tests collectors

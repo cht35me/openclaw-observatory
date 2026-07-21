@@ -80,24 +80,30 @@ class ObservatoryClient:
                 if exc.code in _RETRYABLE_STATUSES and attempt < attempts:
                     _logger.warning(
                         "submit %s got HTTP %s; retrying in %.1fs",
-                        event_type, exc.code, delay,
+                        event_type,
+                        exc.code,
+                        delay,
                     )
                 else:
                     _logger.error(
                         "submit %s rejected with HTTP %s (no retry)",
-                        event_type, exc.code,
+                        event_type,
+                        exc.code,
                     )
                     self.failures_total += 1
                     return False
             except (urllib.error.URLError, OSError, TimeoutError) as exc:
                 if attempt >= attempts:
-                    _logger.error("submit %s failed after %d attempts: %s",
-                                  event_type, attempts, exc)
+                    _logger.error(
+                        "submit %s failed after %d attempts: %s", event_type, attempts, exc
+                    )
                     self.failures_total += 1
                     return False
                 _logger.warning(
                     "submit %s connection error (%s); retrying in %.1fs",
-                    event_type, exc, delay,
+                    event_type,
+                    exc,
+                    delay,
                 )
             self._sleep(delay)
             delay = min(delay * 2, 30.0)

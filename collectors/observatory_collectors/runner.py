@@ -107,7 +107,8 @@ class CollectorRunner:
     def run_forever(self, tick: float = 1.0) -> None:  # pragma: no cover - loop
         _logger.info(
             "collector started: fleet_id=%s type=%s heartbeat=%.0fs",
-            self._config.fleet_id, self._collector_type,
+            self._config.fleet_id,
+            self._collector_type,
             self._config.heartbeat_interval,
         )
         while True:

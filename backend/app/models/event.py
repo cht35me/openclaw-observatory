@@ -48,9 +48,7 @@ class EventIn(BaseModel):
         description="Source timestamp; must be timezone-aware (e.g. ISO-8601 with 'Z')."
     )
     event_type: Identifier
-    payload: dict[str, Any] = Field(
-        description="Arbitrary JSON object with the event body."
-    )
+    payload: dict[str, Any] = Field(description="Arbitrary JSON object with the event body.")
     schema_version: int = Field(
         default=1,
         ge=1,
