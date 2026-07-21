@@ -1,0 +1,35 @@
+# Observatory OpenClaw agent collector (Mission M003 §3/§4).
+#
+# systemd *user* unit — install for the agent user on RPSG01:
+#   mkdir -p ~/.config/systemd/user
+#   cp collectors/systemd/observatory-agent-collector.service ~/.config/systemd/user/
+#   cp collectors/config.example.env ~/.config/observatory/agent-collector.env  (edit values)
+#   chmod 600 ~/.config/observatory/agent-collector.env
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now observatory-agent-collector
+#   loginctl enable-linger $USER
+#
+# NOTE (AGENTS.md §12): enabling this service is an infrastructure change
+# requiring supervisor approval — granted for RPSG01 in M003 PR 2, where this
+# unit was installed and validated live (see collectors/README.md).
+
+[Unit]
+Description=OpenClaw Observatory agent collector (OpenClaw self-monitoring)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/observatory/agent-collector.env
+WorkingDirectory=%h/projects/openclaw-observatory/collectors
+ExecStart=/usr/bin/python3 -m observatory_collectors.openclaw_agent
+Restart=on-failure
+RestartSec=10
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=read-only
+ProtectSystem=strict
+
+[Install]
+WantedBy=default.target

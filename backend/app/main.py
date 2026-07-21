@@ -25,6 +25,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import Response
 
 from app.api.health import router as health_router
+from app.api.monitor import router as monitor_router
 from app.api.prometheus import router as prometheus_router
 from app.api.v1 import routers as v1_routers
 from app.auth import ApiKeyAuthenticator
@@ -157,6 +158,7 @@ def create_app(
         return await request_validation_exception_handler(request, exc)
 
     app.include_router(health_router)
+    app.include_router(monitor_router)
     app.include_router(prometheus_router)
     for router in v1_routers:
         app.include_router(router)

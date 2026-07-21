@@ -1,0 +1,38 @@
+# ClickHouse server for the OpenClaw Observatory — native binary deployment.
+#
+# Why native: official ClickHouse Docker images require ARMv8.2 instructions;
+# the Raspberry Pi 4 (Cortex-A72, ARMv8.0) cannot run them, so RPSG01 runs
+# the native aarch64 binary instead (backend/ARCHITECTURE.md §Environments).
+# The x86-64 production VPS uses docker-compose.yml, not this unit.
+#
+# systemd *user* unit — install on the deployment host:
+#   mkdir -p ~/.config/systemd/user
+#   cp deploy/systemd/observatory-clickhouse.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now observatory-clickhouse
+#   loginctl enable-linger $USER
+#
+# The working directory holds the server binary AND its data (<path>./ in the
+# default embedded config). Loopback-only by default configuration; never
+# expose 8123/9000 beyond the host (SD-003: tailnet-internal at most).
+
+[Unit]
+Description=ClickHouse server (OpenClaw Observatory storage, SD-005)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/tools/clickhouse-v80compat
+ExecStart=%h/tools/clickhouse-v80compat/clickhouse server
+Restart=on-failure
+RestartSec=10
+# ClickHouse wants a large fd budget (matches docker-compose.yml ulimits).
+LimitNOFILE=262144
+# Keep the Pi responsive: cap ClickHouse below physical RAM (3.7 GiB total).
+MemoryMax=2G
+
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

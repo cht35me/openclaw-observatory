@@ -11,18 +11,18 @@ supervisor a single place to answer: **what is the fleet doing, is it healthy, a
 anything need my attention?**
 
 The M001 foundation phase (documentation, architecture, governance) is complete:
-architecture and technology decisions **SD-001…SD-017** (approved) and
-**SD-018…SD-019** (proposed under M003) are recorded in
+architecture and technology decisions **SD-001…SD-020** (approved/accepted) are
+recorded in
 [docs/decisions/](docs/decisions/README.md). Mission **M002** delivered the first
 production code: the core backend skeleton in [backend/](backend/) — an authenticated,
 versioned ingestion API backed by ClickHouse, with health, metrics, and structured
 logging. Mission **M003** adds Observatory self-awareness in two PRs: **PR 1**
-(this branch) delivers the Fleet Registry, mission lifecycle tracking, heartbeat
+(merged) delivered the Fleet Registry, mission lifecycle tracking, heartbeat
 and offline/online processing, read-only APIs, backend self-monitoring, and the
-refined fleet identity model; **PR 2** (branch `a001/m003-collectors-monitor`)
-delivers the deployable RPSG01 collectors and the lightweight Observatory
-Monitor. See [Backend Service](#backend-service-m002m003) and
-[Collectors](#collectors-m003-pr-2).
+refined fleet identity model; **PR 2** delivers the deployable RPSG01
+collectors, the real RPSG01 installation, and the lightweight **Observatory
+Monitor** (`GET /monitor`). See [Backend Service](#backend-service-m002m003)
+and [Collectors](#collectors-m003-pr-2).
 
 The Observatory is designed in two variants
 ([SD-001](docs/decisions/SD-001-central-and-local-observability.md)):
@@ -146,7 +146,8 @@ This starts ClickHouse (internal-only; no host port) and the backend on
 | Endpoint | Auth | Description |
 | --- | --- | --- |
 | `GET /health` | none ([SD-013](docs/decisions/SD-013-health-endpoint-unauthenticated.md)) | Status (`ok`/`degraded`), version, uptime, DB connectivity. Always HTTP 200; a DB outage flips `status` to `degraded` (a liveness probe must not restart a healthy API process). |
-| `GET /metrics` | none, internal-only ([SD-014](docs/decisions/SD-014-metrics-endpoint-unauthenticated.md)) | Prometheus metrics: request count/latency, ingestion successes/failures, DB latency. Protected by network boundaries (firewall/reverse proxy/tailnet), never exposed publicly. |
+| `GET /metrics` | none, internal-only ([SD-014](docs/decisions/SD-014-metrics-endpoint-unauthenticated.md)) | Prometheus metrics: request count/latency, ingestion successes/failures, DB latency, fleet gauges, heartbeat latency, offline transitions. Protected by network boundaries (firewall/reverse proxy/tailnet), never exposed publicly. |
+| `GET /monitor` | none, internal-only ([SD-020](docs/decisions/SD-020-server-rendered-monitor-in-backend.md)) | **Observatory Monitor** — server-rendered HTML instrument panel: OpenClaw agent health, mission progress, host CPU/RAM/storage, Docker containers, fleet & service health. Stdlib rendering, meta-refresh, no JS/build toolchain; loopback/tailnet exposure only. |
 | `POST /api/v1/events` | `X-API-Key` | Ingest one telemetry event (strictly validated JSON). Returns `202` with the assigned event UUID. Each key is bound to one collector identity ([SD-017](docs/decisions/SD-017-api-key-bound-to-fleet-identity.md)); submitting another `collector_id` returns `403`. Event types with server-side semantics (`heartbeat`, `mission_update`) are validated against their payload schemas and drive projections. |
 | `GET /api/v1/fleet` | `X-API-Key` | List all Fleet Registry assets with derived connectivity, last heartbeat, and computed health score (read-only). |
 | `GET /api/v1/fleet/{id}` | `X-API-Key` | One registry asset by Fleet ID, or `404`. |
@@ -183,22 +184,44 @@ curl -s -X POST http://127.0.0.1:8000/api/v1/events \
 | `BACKGROUND_TASKS_ENABLED` | `true` | Master switch for background loops (tests disable) |
 | `HEALTH_*` | see `app/config.py` | Health-score thresholds (CPU temp, disk, RAM, heartbeat age, failures) |
 
-Collector-side configuration (`HEARTBEAT_INTERVAL`, `OFFLINE_TIMEOUT` analogue,
-`FLEET_ID`, `COLLECTOR_NAME`, `MISSION_POLL_INTERVAL`, …) ships with the
-collectors in M003 PR 2.
+Collector-side configuration (`HEARTBEAT_INTERVAL`, `FLEET_ID`,
+`COLLECTOR_NAME`, `MISSION_POLL_INTERVAL`, …) is documented in
+[collectors/README.md](collectors/README.md).
 
 ## Collectors (M003 PR 2)
 
 Push-based telemetry producers ([SD-002](docs/decisions/SD-002-push-based-collectors.md))
-arrive with **M003 PR 2** (branch `a001/m003-collectors-monitor`): the
-**Raspberry Pi host collector** (system metrics, Docker telemetry, heartbeats)
-and the **OpenClaw agent collector** (agent status, mission updates,
+live in [collectors/](collectors/): the **Raspberry Pi host collector**
+(system metrics, Docker telemetry, heartbeats) and the **OpenClaw agent
+collector** (agent status, mission updates with the first-sync backfill rule,
 heartbeats). They are standard-library-only Python
-([SD-019](docs/decisions/SD-019-stdlib-only-collectors.md), proposed) — no
-`pip install` on fleet hosts — and ship with systemd units. The backend-side
-contract they must satisfy (payload schemas for `heartbeat` and
-`mission_update`, SD-017 key↔identity binding, registry-known Fleet IDs) is
-fully defined and enforced by this backend.
+([SD-019](docs/decisions/SD-019-stdlib-only-collectors.md)) — no
+`pip install` on fleet hosts — and ship with systemd user units. Both are
+installed and running on RPSG01 (supervisor-authorized, M003 PR 2). The
+backend-side contract (payload schemas for `heartbeat` and `mission_update`,
+SD-017 key↔identity binding, registry-known Fleet IDs) is fully defined and
+enforced by this backend. See [collectors/README.md](collectors/README.md).
+
+### RPSG01 runbook (native deployment, as executed)
+
+The full stack runs on RPSG01 as **systemd user units** (`loginctl
+enable-linger` keeps them up without a session):
+
+| Unit | What | Where |
+| --- | --- | --- |
+| `observatory-clickhouse` | Native ClickHouse binary (Pi 4 cannot run CH docker images), loopback `8123`/`9000` | [deploy/systemd/](deploy/systemd/) |
+| `observatory-backend` | uvicorn from `backend/.venv`, loopback `127.0.0.1:8000` | [deploy/systemd/](deploy/systemd/) |
+| `observatory-host-collector` | RPSG01 system + Docker telemetry | [collectors/systemd/](collectors/systemd/) |
+| `observatory-agent-collector` | A001 agent status + mission tracking | [collectors/systemd/](collectors/systemd/) |
+
+Configuration and secrets live in untracked `~/.config/observatory/*.env`
+files (chmod 600; API keys generated with `openssl rand -hex 32`, one key per
+fleet identity per [SD-017](docs/decisions/SD-017-api-key-bound-to-fleet-identity.md));
+the repository carries placeholder examples only
+([deploy/backend.example.env](deploy/backend.example.env),
+[collectors/config.example.env](collectors/config.example.env)).
+Installation steps as executed: [collectors/README.md](collectors/README.md#deployment-on-rpsg01-as-executed-m003-pr-2).
+The monitor is then live at `http://127.0.0.1:8000/monitor`.
 
 ### Local development and tests
 
@@ -233,6 +256,11 @@ reachable (e.g. via `docker compose up clickhouse`).
 │   ├── Dockerfile              # Slim, non-root container image
 │   ├── requirements*.txt       # Pinned dependencies
 │   └── OPEN_QUESTIONS.md       # M002 questions — resolved as SD-013…SD-017
+├── collectors/                 # Stdlib-only fleet collectors (M003 PR 2, SD-019)
+│   ├── observatory_collectors/ # host_pi + openclaw_agent packages
+│   ├── systemd/                # Collector systemd user units
+│   └── tests/                  # Offline collector suite (fixture-driven)
+├── deploy/                     # Native RPSG01 deployment (units + example env)
 └── docs/
     ├── vision.md               # Mission Control vision
     ├── requirements.md         # Functional and non-functional requirements
@@ -244,8 +272,7 @@ reachable (e.g. via `docker compose up clickhouse`).
     └── decisions/              # Supervisor decision records (SD-NNN-name.md)
 ```
 
-The `collectors/` directory (stdlib-only collector package, systemd units) is
-added by M003 PR 2 from branch `a001/m003-collectors-monitor`.
+
 
 The full target structure (frontend, collectors, schemas, infra, tests) is documented
 in [docs/architecture.md](docs/architecture.md#5-proposed-repository-structure).

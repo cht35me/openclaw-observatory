@@ -1,0 +1,37 @@
+# Observatory Raspberry Pi host collector (Mission M003 §2/§10).
+#
+# systemd *user* unit — install for the collector user on RPSG01:
+#   mkdir -p ~/.config/systemd/user
+#   cp collectors/systemd/observatory-host-collector.service ~/.config/systemd/user/
+#   cp collectors/config.example.env ~/.config/observatory/host-collector.env  (edit values)
+#   chmod 600 ~/.config/observatory/host-collector.env
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now observatory-host-collector
+#   loginctl enable-linger $USER     # keep user units running without a session
+#
+# NOTE (AGENTS.md §12): enabling this service is an infrastructure change
+# requiring supervisor approval — granted for RPSG01 in M003 PR 2, where this
+# unit was installed and validated live (see collectors/README.md).
+
+[Unit]
+Description=OpenClaw Observatory host collector (Raspberry Pi telemetry)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Real values (API key!) live in the untracked env file, never in this unit.
+EnvironmentFile=%h/.config/observatory/host-collector.env
+WorkingDirectory=%h/projects/openclaw-observatory/collectors
+ExecStart=/usr/bin/python3 -m observatory_collectors.host_pi
+Restart=on-failure
+RestartSec=10
+
+# Hardening (least privilege; docker group access is required for §10).
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=read-only
+ProtectSystem=strict
+
+[Install]
+WantedBy=default.target
