@@ -37,6 +37,7 @@ from app.models.mission import MissionRecord
 from app.models.registry import AssetType, Connectivity, FleetAssetView, HealthStatus
 from app.services.registry import SYSTEM_METRICS_EVENT_TYPE, RegistryService
 from app.storage.base import EventStorage, MissionStorage
+from app.version import GIT_COMMIT
 
 #: Event types consumed by the monitor beyond the registry read-model.
 DOCKER_STATUS_EVENT_TYPE = "docker_status"
@@ -55,6 +56,9 @@ class MonitorSnapshot:
     backend_fleet_id: str
     backend_uptime_seconds: float
     database_connected: bool
+    #: Git commit of the running checkout (deployment traceability,
+    #: supervisor review PR 2); ``None`` renders as ``unknown``.
+    git_commit: str | None = None
     assets: list[FleetAssetView] = field(default_factory=list)
     missions: list[MissionRecord] = field(default_factory=list)
     host_fleet_id: str | None = None
@@ -117,6 +121,7 @@ async def build_snapshot(
         backend_fleet_id=settings.fleet_id,
         backend_uptime_seconds=uptime_seconds,
         database_connected=db_connected,
+        git_commit=GIT_COMMIT,
         assets=assets,
         missions=mission_records,
         host_fleet_id=host_id,
@@ -236,8 +241,10 @@ def _render_agent_section(snapshot: MonitorSnapshot) -> str:
         ("Process uptime", _fmt_duration(status.get("process_uptime_seconds"))),
         ("Last completed task", _dash(status.get("last_completed_task"))),
         ("Reported", _fmt_age(snapshot.agent_status_at, snapshot.generated_at)),
-        # Token usage is not exposed by the runtime in a machine-readable
-        # form yet — recorded as an open question (docs/M003-open-questions.md).
+        # Token usage placeholder. Intended future ownership (Gate G3 review
+        # ruling, docs/M003-open-questions.md §9): the OpenClaw runtime
+        # exposes usage in the agent state file, the existing agent collector
+        # reports it; Claude API accounting stays a central-side cross-check.
         ("Token usage", '<span class="muted">n/a — not yet collected</span>'),
     ]
     body = "".join(
@@ -400,9 +407,28 @@ tr + tr td, tr + tr th { border-top: 1px solid #1d242c; }
 """
 
 
+def _active_mission_label(snapshot: MonitorSnapshot) -> str:
+    """Active mission for the header: agent-reported first, projection second.
+
+    The agent's own status report is the freshest signal; when it is absent
+    (e.g. the agent collector is down) fall back to the newest non-Completed
+    mission in the backend's projection. ``none`` when neither knows one.
+    """
+    status = snapshot.agent_status or {}
+    mission = status.get("active_mission")
+    if mission:
+        state = status.get("mission_state")
+        return f"{_esc(mission)} ({_esc(state)})" if state else _esc(mission)
+    for record in reversed(snapshot.missions):
+        if record.state != "Completed":
+            return f"{_esc(record.mission_id)} ({_esc(record.state)})"
+    return "none"
+
+
 def render_monitor_html(snapshot: MonitorSnapshot) -> str:
     """Render the full monitor page (pure function of the snapshot)."""
     db_badge = _bool_badge(snapshot.database_connected, "connected", "unreachable")
+    commit = _esc(snapshot.git_commit[:12]) if snapshot.git_commit else "unknown"
     return (
         "<!DOCTYPE html>"
         '<html lang="en"><head><meta charset="utf-8">'
@@ -411,8 +437,12 @@ def render_monitor_html(snapshot: MonitorSnapshot) -> str:
         "<title>Observatory Monitor</title>"
         f"<style>{_STYLE}</style></head><body>"
         "<h1>OpenClaw Observatory — Monitor</h1>"
+        # Deployment identification (supervisor review, PR 2): version,
+        # commit, and active mission up front so troubleshooting starts
+        # from exactly which software is running on this host.
         f'<p class="meta">{_esc(snapshot.backend_fleet_id)} '
-        f"v{_esc(snapshot.backend_version)} · database {db_badge} · "
+        f"v{_esc(snapshot.backend_version)} · commit {commit} · "
+        f"mission {_active_mission_label(snapshot)} · database {db_badge} · "
         f"backend up {_fmt_duration(snapshot.backend_uptime_seconds)} · "
         f"generated {_esc(snapshot.generated_at.strftime('%Y-%m-%d %H:%M:%S %Z'))} · "
         f"auto-refresh {REFRESH_SECONDS}s</p>"

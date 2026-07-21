@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi.testclient import TestClient
 
+from app.models.mission import MissionRecord
 from app.services.monitor import (
     MonitorSnapshot,
     _fmt_bytes,
@@ -55,6 +56,47 @@ def test_render_empty_snapshot_degrades_gracefully() -> None:
     assert "registry is empty" in html
     assert "unreachable" in html  # database badge
     assert 'http-equiv="refresh"' in html
+    # Deployment header degrades honestly with no commit / no mission.
+    assert "commit unknown" in html
+    assert "mission none" in html
+
+
+def _mission(mission_id: str, state: str) -> MissionRecord:
+    return MissionRecord(
+        mission_id=mission_id,
+        title=f"Mission {mission_id}",
+        assigned_agent="A001",
+        state=state,
+        created_at=NOW,
+        pr_ref=None,
+        commit_sha=None,
+        updated_at=NOW,
+    )
+
+
+def test_header_shows_deployment_information() -> None:
+    """Version, git commit, and active mission identify the deployment."""
+    html = render_monitor_html(
+        _snapshot(
+            git_commit="e3bf1a3deadbeefcafe0123456789abcdef01234",
+            agent_status={"active_mission": "M003", "mission_state": "Running"},
+        )
+    )
+    assert "v0.0.0-test" in html
+    assert "commit e3bf1a3deadb" in html  # shortened to 12 chars
+    assert "e3bf1a3deadbeefcafe" not in html  # full SHA not dumped
+    assert "mission M003 (Running)" in html
+
+
+def test_header_active_mission_falls_back_to_projection() -> None:
+    """Without an agent report, the newest non-Completed mission is shown."""
+    html = render_monitor_html(
+        _snapshot(missions=[_mission("M002", "Completed"), _mission("M003", "Review")])
+    )
+    assert "mission M003 (Review)" in html
+
+    html = render_monitor_html(_snapshot(missions=[_mission("M002", "Completed")]))
+    assert "mission none" in html  # only completed missions → nothing active
 
 
 def test_render_includes_live_values() -> None:
@@ -155,6 +197,10 @@ def test_monitor_route_serves_html_without_auth(client: TestClient) -> None:
     # Seeded registry assets are visible.
     for fleet_id in ("A001", "RPSG01", "OBLN01"):
         assert fleet_id in response.text
+    # Deployment header is present (tests run inside the git checkout,
+    # so a real commit is detected rather than "unknown").
+    assert "commit " in response.text
+    assert "commit unknown" not in response.text
 
 
 def test_monitor_route_reflects_ingested_telemetry(client: TestClient) -> None:
