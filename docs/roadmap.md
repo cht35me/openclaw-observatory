@@ -6,9 +6,9 @@ Every implementation phase is delivered as one or more missions
 ([MISSION.md](../MISSION.md)) with small, reviewable Pull Requests.
 
 ```text
-Phase 0 ──▶ Gate G1 ──▶ Phase 1 ──▶ Phase 2 ──▶ Phase 3 ──▶ Phase 4 ──▶ Phase 5 ──▶ ...
-(M001)     (arch          core       collectors   visibility   deploy     integrate
-            approval)     backend    + registry   + frontend               + expand
+Phase 0 ──▶ Gate G1 ──▶ Phase 1 ──▶ Phase 2 ──▶ Phase 2.1 ──▶ Phase 3 ──▶ Phase 4 ──▶ ...
+(M001)     (arch          core       collectors   hardening     visibility   deploy
+            approval)     backend    + registry   + ops ready   + frontend
 ```
 
 ## Phase 0 — Documentation and Governance Foundation (M001) ✔ this mission
@@ -60,6 +60,40 @@ Ordered within phase:
 **Gate:** real telemetry from RPSG01 visible via API; registry is source of truth for
 identity; offline detection demonstrated.
 
+**Status: Gate G3 closed 2026-07-21** (M003 PR 1 #3 + PR 2 #4 merged; live RPSG01
+deployment validated).
+
+## Phase 2.1 — Observatory Hardening & Operational Readiness (M003.5)
+
+Supervisor-added milestone (2026-07-21): consolidate Phase 2 into a production-ready
+operational platform before Phase 3 visibility work begins. Canonical specification:
+mission document M003.5 (supervisor mission directory). All metadata introduced here
+must scale from a single node to multi-site fleets without schema changes.
+
+1. **Continuous integration** — GitHub Actions (backend unit tests, collector tests,
+   ClickHouse integration tests, lint/format); branch protection requires green
+   checks before merge.
+2. **Deployment hardening** — install / upgrade / uninstall / rollback procedures,
+   *verified* (clean install, upgrade from previous release, reboot recovery,
+   automatic service startup, pre-start configuration validation).
+3. **Host Inventory & Fleet Registry enhancements** — explicit split between Host
+   Inventory (this machine: hardware identity, structured multi-device storage
+   inventory, OS inventory, maintenance status) and Fleet Registry (all nodes:
+   reduced view locally as-is, enhanced view reserved for the central node,
+   environment classification).
+4. **Monitor improvements** — build/deployment metadata, system summary, storage
+   inventory, richer Docker statistics, network interfaces, Recent Events (last 20).
+5. **Token-usage architecture** — ownership documented (source, collector, future
+   integration); no implementation.
+6. **Security & release discipline** — release/deployment/rollback checklists,
+   PR template, release tagging guidance.
+
+**Dependencies:** Phase 2 (Gate G3 closed).
+**Gate G3.5:** CI operational with required status checks; deployment package
+validated; registry exposes complete hardware/OS identity; storage inventory supports
+multiple devices; maintenance status visible; monitor refresh completes within one
+second under normal operation; documentation complete; PRs merged.
+
 ## Phase 3 — Engineering and Cost Visibility + Initial Frontend
 
 1. **GitHub integration** (poller: repos, branches, latest commit, active PRs, review
@@ -71,7 +105,7 @@ identity; offline detection demonstrated.
    minimal feature set and grow, but on the SPA stack from the start).
 4. **Dashboard authentication** (supervisor login).
 
-**Dependencies:** Phase 2 (registry + mission data to display).
+**Dependencies:** Phase 2.1 (registry + mission data to display, hardened platform).
 **Gate:** supervisor can answer "what is the fleet doing right now?" from the dashboard
 alone.
 
