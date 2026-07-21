@@ -164,7 +164,6 @@ class Settings(BaseSettings):
             seen[key] = collector_id
         return bindings
 
-
     def startup_problems(self) -> list[str]:
         """Validate operational invariants beyond field-level type checks.
 

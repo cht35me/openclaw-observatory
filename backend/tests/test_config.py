@@ -105,7 +105,15 @@ def test_deployment_environment_default_and_parsing() -> None:
 
 def _valid_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Minimal valid environment for load_settings(), isolated from the host."""
-    prefixes = ("CLICKHOUSE_", "API_KEYS", "LOG_LEVEL", "APP_", "HEARTBEAT_", "OFFLINE_", "DEPLOYMENT_")
+    prefixes = (
+        "CLICKHOUSE_",
+        "API_KEYS",
+        "LOG_LEVEL",
+        "APP_",
+        "HEARTBEAT_",
+        "OFFLINE_",
+        "DEPLOYMENT_",
+    )
     for name in list(os.environ):
         if name.startswith(prefixes):
             monkeypatch.delenv(name, raising=False)

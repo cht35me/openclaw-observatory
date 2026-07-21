@@ -1,6 +1,8 @@
 # Deployment Strategy — OpenClaw Observatory
 
-Status: **Strategy only. Nothing is deployed during M001.**
+Status: **Strategy (§1–§11) plus the operational RPSG01 package (§12,
+Phase 2.1).** The VPS staging/production topology remains future work
+(Phase 4); the RPSG01 native deployment is live and scripted.
 
 ## 1. Deployment Lifecycle Overview
 
@@ -158,6 +160,50 @@ version + commit; staging and production run the *same image*.
 - [ ] `/metrics` exposed and scraped/watched
 - [ ] Rollback rehearsed on staging
 - [ ] Incident-response runbook reachable and current ([security.md](security.md) §12)
+
+## 12. RPSG01 Native Deployment Package (Phase 2.1)
+
+Mission M003.5 §2 delivered a scripted lifecycle for the current native
+deployment (systemd user units on RPSG01). Full runbook:
+[deploy/README.md](../deploy/README.md).
+
+- **Install / upgrade / rollback / uninstall:**
+  [deploy/scripts/](../deploy/scripts/) — idempotent install (never overwrites
+  real config), upgrade to a release tag with recorded rollback target
+  (`~/.config/observatory/deploy-state`), rollback to the recorded previous
+  deployment, conservative uninstall (unit files and config are moved aside,
+  never deleted; ClickHouse data untouched).
+- **Configuration validation before startup (fail fast):** the backend
+  (`uvicorn --factory app.main:build_app` → `app.config.load_settings()`)
+  and both collectors (`CollectorConfig.from_env()`) reject
+  missing/invalid/placeholder configuration with one clear, secret-free
+  error and exit code 2 **before binding or collecting**. The deploy scripts
+  run the same validation before restarting anything, so a bad upgrade
+  leaves the running services untouched.
+- **Automatic service startup:** all four units are `enabled` and
+  `loginctl enable-linger` is on (verified live in PR 3), so the stack
+  starts at boot with no login session.
+
+### Reboot-recovery validation checklist
+
+The reboot test is coordinated with the supervisor (it kills the agent
+runtime). After any host reboot, verify — in order:
+
+1. `loginctl show-user openclaw --property=Linger` → `Linger=yes`.
+2. `systemctl --user is-active observatory-clickhouse observatory-backend
+   observatory-host-collector observatory-agent-collector` → four× `active`
+   (allow ~1 min for `Restart=on-failure` to settle ClickHouse before the
+   backend's first storage connection).
+3. `curl -s http://127.0.0.1:8000/health` → `"status":"ok"` **and**
+   `"database":{"connected":true}`.
+4. `/monitor` header → expected version + commit (unchanged by the reboot),
+   `env Production`, database `connected`.
+5. Within ~60 s: fresh heartbeats from `RPSG01` and `A001` (monitor Fleet &
+   Services table shows recent `Last heartbeat`; no asset stuck `offline`).
+6. `journalctl --user -u observatory-backend -b -n 50` → no errors after the
+   startup sequence; `Recent Events` shows a single `service_start`.
+7. Host-collector telemetry resumes (monitor Host section `Reported` age
+   ≤ telemetry interval) and `Last reboot` reflects the actual reboot time.
 
 ---
 
