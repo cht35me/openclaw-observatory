@@ -23,6 +23,24 @@ def test_defaults_and_required_fields() -> None:
     assert config.heartbeat_interval == 30.0
     assert config.telemetry_interval == 30.0  # follows heartbeat by default
     assert config.mission_poll_interval == 60.0
+    # Probe executable paths default to PATH discovery (M003.6 §1).
+    assert config.claude_bin is None
+    assert config.openclaw_bin is None
+
+
+def test_probe_binary_paths_configurable() -> None:
+    env = {
+        **BASE_ENV,
+        "CLAUDE_BIN": "/home/user/.local/bin/claude",
+        "OPENCLAW_BIN": "/home/user/.openclaw/tools/node-v24.15.0/bin/openclaw",
+    }
+    config = CollectorConfig.from_env(env)
+    assert config.claude_bin == "/home/user/.local/bin/claude"
+    assert config.openclaw_bin == "/home/user/.openclaw/tools/node-v24.15.0/bin/openclaw"
+    # Blank values behave like unset (fallback to PATH discovery).
+    blank = CollectorConfig.from_env({**BASE_ENV, "CLAUDE_BIN": "  ", "OPENCLAW_BIN": ""})
+    assert blank.claude_bin is None
+    assert blank.openclaw_bin is None
 
 
 def test_intervals_configurable() -> None:

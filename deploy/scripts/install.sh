@@ -78,7 +78,25 @@ else
   log "OBS_NO_SYSTEMD=1 — skipping unit installation and lingering"
 fi
 
-# 4. Fail-fast config validation — the same checks the services run at start.
+# 4. Journal readability check (M003.6 §2) — WARN only, never fail: on a
+#    volatile-journal host (Storage=auto without /var/log/journal/<id>, or a
+#    vendor Storage=volatile drop-in as on Raspberry Pi OS Trixie) the
+#    service user cannot read even its own user journal, which cripples
+#    post-incident forensics. The fix is a one-time sudo host op.
+if systemd_enabled && ! journalctl --user -n 1 --no-pager >/dev/null 2>&1; then
+  warn "journalctl --user is not readable for $USER — service logs are"
+  warn "invisible and lost on reboot. Enable persistent journald (one-time,"
+  warn "needs sudo — docs/deployment.md §12 'Persistent journald'):"
+  warn "  # Raspberry Pi OS Trixie ships Storage=volatile in"
+  warn "  # /usr/lib/systemd/journald.conf.d/40-rpi-volatile-storage.conf —"
+  warn "  # override it first via /etc/systemd/journald.conf.d/ (see docs)."
+  warn "  sudo mkdir -p /var/log/journal"
+  warn "  sudo systemd-tmpfiles --create --prefix=/var/log/journal"
+  warn "  sudo systemctl restart systemd-journald"
+  warn "  sudo journalctl --flush"
+fi
+
+# 5. Fail-fast config validation — the same checks the services run at start.
 if grep -q change-me "$OBS_CONFIG_DIR"/backend.env "$OBS_CONFIG_DIR"/host-collector.env \
      "$OBS_CONFIG_DIR"/agent-collector.env 2>/dev/null; then
   warn "config files under $OBS_CONFIG_DIR still contain placeholders."
@@ -89,7 +107,7 @@ if grep -q change-me "$OBS_CONFIG_DIR"/backend.env "$OBS_CONFIG_DIR"/host-collec
 fi
 validate_all_config
 
-# 5. Optional start + health verification.
+# 6. Optional start + health verification.
 if [ "$START" = 1 ]; then
   if systemd_enabled; then
     [ -x "$OBS_CLICKHOUSE_DIR/clickhouse" ] && systemctl --user start "$OBS_CLICKHOUSE_UNIT"

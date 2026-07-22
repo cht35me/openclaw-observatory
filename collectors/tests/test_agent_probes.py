@@ -1,11 +1,21 @@
-"""OpenClaw agent probe tests (M003 §3/§4)."""
+"""OpenClaw agent probe tests (M003 §3/§4, M003.6 §1)."""
 
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from observatory_collectors.openclaw_agent import probes
 from observatory_collectors.openclaw_agent.collector import AgentTelemetry
+
+
+def _fake_cli(directory: Path, name: str, output: str) -> str:
+    """Executable stub that answers ``--version`` with ``output``."""
+    script = directory / name
+    script.write_text(f"#!/bin/sh\necho '{output}'\n", encoding="utf-8")
+    script.chmod(0o755)
+    return str(script)
+
 
 STATE = {
     "agent_status": "active",
@@ -123,6 +133,61 @@ def test_agent_status_payload_shape(tmp_path) -> None:
     assert "claude_code" in payload and "available" in payload["claude_code"]
     assert "runtime_version" in payload
     assert "process_uptime_seconds" in payload
+
+
+def test_cli_version_with_explicit_path(tmp_path) -> None:
+    claude = _fake_cli(tmp_path, "claude", "2.1.215 (Claude Code)")
+    assert probes._cli_version(claude) == "2.1.215 (Claude Code)"
+    # A configured path that does not exist fails soft.
+    assert probes._cli_version(str(tmp_path / "missing")) is None
+
+
+def test_probe_claude_code_with_explicit_bin(tmp_path) -> None:
+    claude = _fake_cli(tmp_path, "claude", "2.1.215 (Claude Code)")
+    result = probes.probe_claude_code(claude)
+    assert result == {"available": True, "version": "2.1.215 (Claude Code)"}
+
+
+def test_probe_claude_code_path_fallback(monkeypatch) -> None:
+    # Unset CLAUDE_BIN -> PATH discovery via shutil.which (legacy behaviour).
+    monkeypatch.setattr(probes.shutil, "which", lambda binary: None)
+    assert probes.probe_claude_code() == {"available": False, "version": None}
+
+
+def test_probe_runtime_version_uses_configured_bin_and_sibling_node(tmp_path) -> None:
+    openclaw = _fake_cli(tmp_path, "openclaw", "OpenClaw 2026.6.11 (e085fa1)")
+    _fake_cli(tmp_path, "node", "v24.15.0")
+    # The node NEXT TO the configured launcher is the actual runtime node —
+    # not whatever /usr/bin/node the unit PATH happens to expose.
+    assert probes.probe_runtime_version(openclaw) == "OpenClaw 2026.6.11 (e085fa1) · node v24.15.0"
+
+
+def test_probe_runtime_version_without_sibling_node(tmp_path, monkeypatch) -> None:
+    openclaw = _fake_cli(tmp_path, "openclaw", "OpenClaw 2026.6.11 (e085fa1)")
+    real_which = probes.shutil.which
+    # No sibling node and no PATH node -> launcher version alone.
+    monkeypatch.setattr(probes.shutil, "which", lambda b: None if b == "node" else real_which(b))
+    assert probes.probe_runtime_version(openclaw) == "OpenClaw 2026.6.11 (e085fa1)"
+
+
+def test_probe_runtime_version_node_fallback(tmp_path, monkeypatch) -> None:
+    # No openclaw anywhere, PATH node available -> legacy "node vX" fallback.
+    node = _fake_cli(tmp_path, "node", "v22.23.1")
+    monkeypatch.setattr(probes.shutil, "which", lambda b: node if b in ("node", node) else None)
+    assert probes.probe_runtime_version() == "node v22.23.1"
+    # Configured launcher missing entirely -> still degrades to node (the
+    # sibling of the configured-but-absent launcher, then PATH).
+    assert probes.probe_runtime_version(str(tmp_path / "missing")) == "node v22.23.1"
+
+
+def test_agent_status_uses_configured_probe_bins(tmp_path) -> None:
+    claude = _fake_cli(tmp_path, "claude", "9.9.9 (Claude Code)")
+    openclaw = _fake_cli(tmp_path, "openclaw", "OpenClaw 9.9.9 (test)")
+    _fake_cli(tmp_path, "node", "v24.15.0")
+    telemetry = AgentTelemetry(state_file=None, claude_bin=claude, openclaw_bin=openclaw)
+    payload = telemetry.produce_status()[0][1]
+    assert payload["claude_code"] == {"available": True, "version": "9.9.9 (Claude Code)"}
+    assert payload["runtime_version"] == "OpenClaw 9.9.9 (test) · node v24.15.0"
 
 
 def test_agent_status_without_state_file() -> None:

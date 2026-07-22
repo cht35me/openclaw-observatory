@@ -28,9 +28,12 @@ This module is split into a *snapshot builder* (async, talks to storage) and
 from __future__ import annotations
 
 import html
+import logging
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, tzinfo
+from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.config import Settings
 from app.models.event import Event
@@ -49,6 +52,42 @@ AGENT_STATUS_EVENT_TYPE = "agent_status"
 
 #: Page auto-refresh interval (seconds) — meta refresh, no JavaScript.
 REFRESH_SECONDS = 10
+
+_logger = logging.getLogger("app.monitor")
+
+
+def _host_timezone() -> tzinfo:
+    """The host's local timezone (M003.6 §3), best effort.
+
+    ``/etc/localtime`` is normally a symlink into the tzdata tree; resolving
+    it recovers the IANA name (DST-correct rendering). Fallback: the fixed
+    offset the C library reports right now (honours ``TZ``), then UTC.
+    """
+    try:
+        target = Path("/etc/localtime").resolve()
+        parts = target.parts
+        if "zoneinfo" in parts:
+            name = "/".join(parts[parts.index("zoneinfo") + 1 :])
+            return ZoneInfo(name)
+    except (OSError, ValueError, ZoneInfoNotFoundError):
+        pass
+    return datetime.now().astimezone().tzinfo or UTC
+
+
+def resolve_display_timezone(name: str | None) -> tzinfo:
+    """``DISPLAY_TZ`` → tzinfo, falling back safely (M003.6 §3).
+
+    An explicit IANA name wins; empty/unset means the host's local timezone;
+    an invalid name logs a warning and falls back to the host timezone — a
+    bad setting must never break the monitor page.
+    """
+    if name and name.strip():
+        try:
+            return ZoneInfo(name.strip())
+        except (ValueError, ZoneInfoNotFoundError):
+            _logger.warning("DISPLAY_TZ %r is not a valid IANA timezone; using host local", name)
+    return _host_timezone()
+
 
 #: Recent Events cap (M003.5 §4) — one bounded query, keeps the page fast.
 RECENT_EVENTS_LIMIT = 20
@@ -96,6 +135,9 @@ class MonitorSnapshot:
     agent_status: dict[str, Any] | None = None
     agent_status_at: datetime | None = None
     recent_events: list[Event] = field(default_factory=list)
+    #: Timezone for wall-clock display values, e.g. "Last reboot" (M003.6
+    #: §3). Internal timestamps and the "generated … UTC" footer stay UTC.
+    display_tz: tzinfo = UTC
 
 
 async def build_snapshot(
@@ -171,6 +213,7 @@ async def build_snapshot(
         agent_status=agent_status,
         agent_status_at=agent_status_at,
         recent_events=recent,
+        display_tz=resolve_display_timezone(settings.display_tz),
     )
 
 
@@ -262,18 +305,32 @@ def _fmt_installed_memory(total_bytes: Any) -> str:
     return _fmt_bytes(total_bytes)
 
 
-def _fmt_last_reboot(uptime_seconds: Any, now: datetime) -> str:
-    """Humanized boot moment (§3-monitor): ``Today/Yesterday HH:MM`` or
-    ``N days ago``, derived from uptime. Timestamps are UTC (matching the
-    page's ``generated`` stamp)."""
+def _utc_offset_label(moment: datetime) -> str:
+    """Explicit offset suffix, e.g. ``+08`` / ``-05:30`` / ``+00`` (M003.6 §3)."""
+    offset = moment.utcoffset() or timedelta(0)
+    total = int(offset.total_seconds())
+    sign = "+" if total >= 0 else "-"
+    hours, remainder = divmod(abs(total), 3600)
+    minutes = remainder // 60
+    return f"{sign}{hours:02d}:{minutes:02d}" if minutes else f"{sign}{hours:02d}"
+
+
+def _fmt_last_reboot(uptime_seconds: Any, now: datetime, tz: tzinfo = UTC) -> str:
+    """Humanized boot moment (§3-monitor, M003.6 §3): ``Today/Yesterday
+    HH:MM (+08)`` or ``N days ago``, derived from uptime.
+
+    Rendered in the display timezone (``DISPLAY_TZ``, default host local)
+    with an explicit offset suffix — day boundaries (Today/Yesterday) follow
+    that timezone, not UTC. Internal timestamps stay UTC."""
     if not isinstance(uptime_seconds, (int, float)) or isinstance(uptime_seconds, bool):
         return "—"
-    booted = now - timedelta(seconds=float(uptime_seconds))
-    days = (now.date() - booted.date()).days
+    booted = (now - timedelta(seconds=float(uptime_seconds))).astimezone(tz)
+    days = (now.astimezone(tz).date() - booted.date()).days
+    stamp = f"{booted.strftime('%H:%M')} ({_utc_offset_label(booted)})"
     if days <= 0:
-        return f"Today {booted.strftime('%H:%M')}"
+        return f"Today {stamp}"
     if days == 1:
-        return f"Yesterday {booted.strftime('%H:%M')}"
+        return f"Yesterday {stamp}"
     return f"{days} days ago"
 
 
@@ -411,7 +468,10 @@ def _render_system_section(snapshot: MonitorSnapshot) -> str:
         ("Kernel", _dash(os_info.get("kernel"))),
         ("Hostname", _dash(os_info.get("hostname"))),
         ("Uptime", _fmt_duration(uptime)),
-        ("Last reboot", _esc(_fmt_last_reboot(uptime, snapshot.generated_at))),
+        (
+            "Last reboot",
+            _esc(_fmt_last_reboot(uptime, snapshot.generated_at, snapshot.display_tz)),
+        ),
         # Maintenance status (§3d): spot systems needing attention fast.
         (
             "Last apt update",

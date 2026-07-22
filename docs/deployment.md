@@ -184,6 +184,71 @@ deployment (systemd user units on RPSG01). Full runbook:
   `loginctl enable-linger` is on (verified live in PR 3), so the stack
   starts at boot with no login session.
 
+### Persistent journald (host prerequisite, M003.6 §2)
+
+Debian defaults to `Storage=auto`: with no `/var/log/journal/<machine-id>`
+directory the journal is **volatile** (`/run/log/journal`, lost on reboot)
+and — crucially for a dedicated service user — unreadable: the runtime
+directory is mode `2750 root:systemd-journal` with an ACL for group `adm`
+only, so `journalctl --user` fails with *"No journal files were opened due
+to insufficient permissions"* even for the user's **own** journal (the
+directory is not traversable). Post-reboot forensics are impossible on top
+of that, because the previous boot's logs are gone.
+
+> **Raspberry Pi OS (Trixie) caveat:** the OS ships a vendor drop-in
+> `/usr/lib/systemd/journald.conf.d/40-rpi-volatile-storage.conf` with
+> `Storage=volatile`, which **overrides** the `Storage=auto` default. On
+> such hosts, creating `/var/log/journal` alone does **nothing** — journald
+> stays volatile. You must add an admin drop-in that sorts *after* the
+> vendor one (verified live on this fleet's Pi, 2026-07-22).
+
+Enable persistent journald **once per host** (requires sudo; this is the
+least-privilege fix — do *not* add the service user to `adm` or
+`systemd-journal`, which would expose every other unit's logs).
+
+**Step 1 — override any vendor `Storage=` drop-in** (required on Raspberry
+Pi OS Trixie; harmless elsewhere). Create
+`/etc/systemd/journald.conf.d/60-observatory-persistent.conf`:
+
+```ini
+[Journal]
+Storage=persistent
+SystemMaxUse=200M
+```
+
+Drop-ins in `/etc/` take precedence over same-or-lower-sorting files in
+`/usr/lib/`, and `60-…` sorts after the vendor `40-…`, so `persistent`
+wins. `SystemMaxUse` caps disk usage — sensible on SD-card hosts.
+
+**Step 2 — create the persistent directory, apply ACLs, and flush:**
+
+```bash
+sudo mkdir -p /var/log/journal
+sudo systemd-tmpfiles --create --prefix=/var/log/journal
+sudo systemctl restart systemd-journald
+sudo journalctl --flush
+```
+
+Why this works: the persistent directory is created `2755` and
+`systemd-tmpfiles` applies the shipped ACLs, which include a **per-user**
+ACL on each `user-<uid>.journal` file — the service user can read exactly
+its own user journal and nothing else, and logs survive reboots. Verify as
+the service user:
+
+```bash
+journalctl --user -n 1 --no-pager   # must print a line, not a permissions error
+```
+
+`deploy/scripts/install.sh` warns (without failing) when the journal is
+unreadable, pointing here.
+
+To confirm which `Storage=` setting is actually in effect (and which file
+set it):
+
+```bash
+systemd-analyze cat-config systemd/journald.conf | grep -B2 '^Storage='
+```
+
 ### Reboot-recovery validation checklist
 
 The reboot test is coordinated with the supervisor (it kills the agent
@@ -203,7 +268,13 @@ runtime). After any host reboot, verify — in order:
 6. `journalctl --user -u observatory-backend -b -n 50` → no errors after the
    startup sequence; `Recent Events` shows a single `service_start`.
 7. Host-collector telemetry resumes (monitor Host section `Reported` age
-   ≤ telemetry interval) and `Last reboot` reflects the actual reboot time.
+   ≤ telemetry interval) and `Last reboot` reflects the actual reboot time
+   in the display timezone (`DISPLAY_TZ`, default host local; offset suffix
+   shown, e.g. `Today 20:52 (+08)`).
+8. Journal readability (M003.6 §2): `journalctl --user -n 1 --no-pager`
+   prints a line (no *insufficient permissions* error) and
+   `journalctl --user -b -1 -n 1` shows the previous boot — persistent
+   journald survived the reboot (see “Persistent journald” above).
 
 ---
 
