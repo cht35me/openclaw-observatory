@@ -7,10 +7,10 @@ import { screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiRequestError } from "@/api/client";
-import { fleetFixture, healthFixture, makeAsset } from "@/test/fixtures";
+import { fleetFixture, healthFixture, makeAsset, makeDockerStatus } from "@/test/fixtures";
 import { renderRoute } from "@/test/utils";
 
-import { deriveServices } from "./useServicesData";
+import { deriveServices, matchContainer } from "./useServicesData";
 
 vi.mock("@/api/endpoints", () => ({
   getHealth: vi.fn(),
@@ -18,6 +18,8 @@ vi.mock("@/api/endpoints", () => ({
   listMissions: vi.fn(),
   getFleetAsset: vi.fn(),
   getHostInventory: vi.fn(),
+  getDockerStatus: vi.fn(),
+  listEvents: vi.fn(),
   probeAuthenticated: vi.fn(),
 }));
 
@@ -26,6 +28,7 @@ const endpoints = vi.mocked(await import("@/api/endpoints"));
 beforeEach(() => {
   endpoints.getHealth.mockResolvedValue(healthFixture);
   endpoints.listFleet.mockResolvedValue(fleetFixture);
+  endpoints.getDockerStatus.mockResolvedValue(makeDockerStatus());
 });
 
 afterEach(() => {
@@ -65,9 +68,9 @@ describe("services view", () => {
     // No exporters are registered — meaningful empty text, not a blank.
     expect(screen.getByText(/no exporters registered/i)).toBeInTheDocument();
 
-    // Restart count / CPU / RAM / RX / TX are not exposed over REST today.
-    expect(screen.getAllByText("Not reported").length).toBeGreaterThanOrEqual(15);
-    expect(screen.getByRole("note")).toHaveTextContent(/not expose them yet/i);
+    // No fixture service maps to a container, so container stats stay honest.
+    expect(screen.getAllByText("Not reported").length).toBeGreaterThanOrEqual(10);
+    expect(screen.getByRole("note")).toHaveTextContent(/containerized services only/i);
   });
 
   it("still renders collectors when /health is unavailable (backend uptime degrades honestly)", async () => {
@@ -80,7 +83,9 @@ describe("services view", () => {
       "section",
     ) as HTMLElement;
     expect(within(backend).getByText("OBLN01 · raspberrypi-sg01")).toBeInTheDocument();
-    expect(within(backend).queryByText("1d 2h")).not.toBeInTheDocument();
+    // PR3: without /health, uptime falls back to the backend's own
+    // self-heartbeat (which carries uptime_seconds) — still a fact, not a guess.
+    expect(within(backend).getByText("1d 2h")).toBeInTheDocument();
   });
 
   it("shows an error state when the fleet read fails", async () => {
@@ -109,13 +114,15 @@ describe("deriveServices", () => {
     expect(services.find((s) => s.id === "OBLN01")?.kind).toBe("backend");
   });
 
-  it("attaches /health uptime only when exactly one backend exists", () => {
+  it("prefers /health uptime for a single backend, heartbeat uptime otherwise", () => {
     const one = deriveServices(
       [makeAsset({ fleet_id: "OBLN01", asset_type: "service", role: "Backend" })],
       healthFixture,
     );
     expect(one[0]?.uptimeSeconds).toBe(healthFixture.uptime_seconds);
 
+    // With two backends, /health cannot be attributed — each falls back to
+    // its own heartbeat's uptime_seconds (PR3 additive field).
     const two = deriveServices(
       [
         makeAsset({ fleet_id: "OBLN01", asset_type: "service", role: "Backend" }),
@@ -123,13 +130,66 @@ describe("deriveServices", () => {
       ],
       healthFixture,
     );
-    expect(two.every((s) => s.uptimeSeconds === null)).toBe(true);
+    expect(two.every((s) => s.uptimeSeconds === 93_784)).toBe(true);
   });
 
-  it("never invents uptime for collectors", () => {
+  it("collector uptime comes from its heartbeat and is never invented", () => {
     const services = deriveServices(fleetFixture, healthFixture);
-    for (const service of services) {
-      if (service.kind !== "backend") expect(service.uptimeSeconds).toBeNull();
-    }
+    const host = services.find((s) => s.kind === "host-collector");
+    const agent = services.find((s) => s.kind === "agent-collector");
+    expect(host?.uptimeSeconds).toBe(93_784); // fixture heartbeat uptime_seconds
+    expect(host?.failuresTotal).toBe(0);
+    expect(agent?.uptimeSeconds).toBeNull(); // no heartbeat → null, never fabricated
+    expect(agent?.failuresTotal).toBeNull();
+  });
+
+  it("maps docker container stats onto matching services only", () => {
+    const docker = makeDockerStatus().payload;
+    const byHost = new Map([["RPSG01", docker]]);
+    const exporter = makeAsset({
+      fleet_id: "BXE01",
+      asset_type: "service",
+      nickname: "Bitaxe Exporter",
+      role: "bitaxe-exporter",
+      host_fleet_id: "RPSG01",
+      deployment_role: "local",
+    });
+    const backend = makeAsset({
+      fleet_id: "OBLN01",
+      asset_type: "service",
+      role: "Observatory Backend",
+      host_fleet_id: "RPSG01",
+      deployment_role: "local",
+    });
+    const services = deriveServices([exporter, backend], healthFixture, byHost);
+
+    const matched = services.find((s) => s.id === "BXE01");
+    expect(matched?.container?.name).toBe("bitaxe-exporter");
+    expect(matched?.container?.cpu_percent).toBe(0.42);
+    expect(matched?.dockerReported).toBe(true);
+
+    // The backend runs as a systemd process — no container match, no fake stats.
+    const unmatched = services.find((s) => s.id === "OBLN01");
+    expect(unmatched?.container).toBeNull();
+    expect(unmatched?.dockerReported).toBe(true);
+  });
+});
+
+describe("matchContainer", () => {
+  const containers = makeDockerStatus().payload.containers;
+
+  it("matches on the exact slug of fleet id, nickname, or role", () => {
+    expect(
+      matchContainer(makeAsset({ nickname: null, role: "Bitaxe Exporter" }), containers)?.name,
+    ).toBe("bitaxe-exporter");
+  });
+
+  it("stays unmatched rather than guessing", () => {
+    expect(
+      matchContainer(makeAsset({ nickname: null, role: "Observatory Backend" }), containers),
+    ).toBeNull();
+    // Partial overlap is not a match — a generic role must never claim
+    // another workload's container stats.
+    expect(matchContainer(makeAsset({ nickname: null, role: "exporter" }), containers)).toBeNull();
   });
 });

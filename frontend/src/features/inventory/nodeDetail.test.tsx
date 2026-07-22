@@ -7,7 +7,13 @@ import { screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiRequestError } from "@/api/client";
-import { fleetFixture, healthFixture, makeAsset, makeInventory } from "@/test/fixtures";
+import {
+  fleetFixture,
+  healthFixture,
+  makeAsset,
+  makeDockerStatus,
+  makeInventory,
+} from "@/test/fixtures";
 import { renderRoute } from "@/test/utils";
 
 vi.mock("@/api/endpoints", () => ({
@@ -16,6 +22,8 @@ vi.mock("@/api/endpoints", () => ({
   listMissions: vi.fn(),
   getFleetAsset: vi.fn(),
   getHostInventory: vi.fn(),
+  getDockerStatus: vi.fn(),
+  listEvents: vi.fn(),
   probeAuthenticated: vi.fn(),
 }));
 
@@ -27,6 +35,7 @@ beforeEach(() => {
   endpoints.getHealth.mockResolvedValue(healthFixture);
   endpoints.getFleetAsset.mockResolvedValue(fleetFixture[0]!);
   endpoints.getHostInventory.mockResolvedValue(makeInventory());
+  endpoints.getDockerStatus.mockResolvedValue(makeDockerStatus());
 });
 
 afterEach(() => {
@@ -84,9 +93,29 @@ describe("node details", () => {
     expect(screen.getByText("No")).toBeInTheDocument();
     expect(screen.getByText("2026-07-14 15:55:26")).toBeInTheDocument();
 
-    // Running Services / Docker are honest placeholders (no REST source yet).
+    // Running Services stays an honest placeholder (no collector source yet).
     expect(screen.getByText(/does not observe systemd services yet/i)).toBeInTheDocument();
-    expect(screen.getByText(/docker_status events feed the \/monitor page/i)).toBeInTheDocument();
+
+    // Docker Containers renders live telemetry (M004 PR3 docker-status route).
+    expect(await screen.findByText("1 of 1 running")).toBeInTheDocument();
+    expect(screen.getByText("bitaxe-exporter")).toBeInTheDocument();
+    expect(screen.getByText("68MiB / 3.7GiB")).toBeInTheDocument();
+  });
+
+  it("renders Docker Containers as not reported on the route's 404", async () => {
+    endpoints.getDockerStatus.mockRejectedValue(
+      notFound("No docker telemetry reported for this fleet_id yet."),
+    );
+    renderRoute("/fleet/RPSG01");
+    expect(await screen.findByText(/docker telemetry not reported/i)).toBeInTheDocument();
+  });
+
+  it("shows a stopped Docker daemon as a labelled critical state", async () => {
+    endpoints.getDockerStatus.mockResolvedValue(
+      makeDockerStatus({ payload: { daemon_running: false } }),
+    );
+    renderRoute("/fleet/RPSG01");
+    expect(await screen.findByText(/docker daemon not running/i)).toBeInTheDocument();
   });
 
   it("renders gracefully when inventory sections are missing (partial payload)", async () => {

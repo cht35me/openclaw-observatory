@@ -12,14 +12,15 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CONNECTIVITY_LABELS, CONNECTIVITY_TONES, HEALTH_TONES } from "@/features/fleet/status";
-import { useFleetAsset, useHostInventory } from "@/features/fleet/useFleetQueries";
-import type { FleetAssetView, HostInventoryPayload, StorageDevice } from "@/types";
+import { useDockerStatus, useFleetAsset, useHostInventory } from "@/features/fleet/useFleetQueries";
+import type { DockerContainer, FleetAssetView, HostInventoryPayload, StorageDevice } from "@/types";
 import {
   formatBytes,
   formatEpochRelative,
   formatInstalledMemory,
   formatPercent,
   formatRelativeTime,
+  formatUptime,
 } from "@/utils/format";
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
@@ -295,14 +296,125 @@ function RunningServicesSection() {
   );
 }
 
-function DockerSection() {
+function ContainerCard({ container }: { container: DockerContainer }) {
+  const running = container.status === "running";
+  const failed =
+    (container.status === "exited" || container.status === "dead") &&
+    (container.exit_code ?? 0) !== 0;
+  return (
+    <div className="rounded-md border px-3 py-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="min-w-0 truncate text-sm font-medium">{container.name ?? "unnamed"}</p>
+        <StatusPill
+          tone={running ? "ok" : failed ? "critical" : "offline"}
+          label={container.status ?? "unknown"}
+          className="text-xs"
+        />
+      </div>
+      {container.image && (
+        <p className="mt-0.5 truncate text-xs text-muted-foreground">{container.image}</p>
+      )}
+      <dl className="mt-1.5 grid grid-cols-2 gap-x-6 sm:grid-cols-3">
+        <Row label="Restarts">{value(container.restart_count)}</Row>
+        <Row label="CPU">
+          {typeof container.cpu_percent === "number" ? formatPercent(container.cpu_percent) : "—"}
+        </Row>
+        <Row label="RAM">
+          {container.memory_usage ??
+            (typeof container.memory_percent === "number"
+              ? formatPercent(container.memory_percent)
+              : "—")}
+        </Row>
+        <Row label="RX">
+          {typeof container.network_rx_bytes === "number"
+            ? formatBytes(container.network_rx_bytes)
+            : "—"}
+        </Row>
+        <Row label="TX">
+          {typeof container.network_tx_bytes === "number"
+            ? formatBytes(container.network_tx_bytes)
+            : "—"}
+        </Row>
+        <Row label="Uptime">
+          {typeof container.uptime_seconds === "number"
+            ? formatUptime(container.uptime_seconds)
+            : "—"}
+        </Row>
+      </dl>
+    </div>
+  );
+}
+
+/** Docker Containers (mission §4), fed by GET /fleet/{id}/docker-status (PR3). */
+function DockerSection({ fleetId }: { fleetId: string }) {
+  const docker = useDockerStatus(fleetId);
+
+  if (docker.isPending) {
+    return (
+      <Section title="Docker Containers">
+        <div className="flex flex-col gap-2.5 py-1" aria-hidden="true">
+          {Array.from({ length: 3 }, (_, row) => (
+            <Skeleton key={row} className="h-4 w-full" />
+          ))}
+        </div>
+      </Section>
+    );
+  }
+  if (docker.isError) {
+    if (isNotFoundError(docker.error)) {
+      return (
+        <Section title="Docker Containers">
+          <SectionNotReported what="Docker telemetry" />
+        </Section>
+      );
+    }
+    return (
+      <Section title="Docker Containers">
+        <ErrorState error={docker.error} onRetry={() => void docker.refetch()} />
+      </Section>
+    );
+  }
+
+  const payload = docker.data.payload;
+  if (payload.daemon_running === false) {
+    return (
+      <Section title="Docker Containers">
+        <StatusPill tone="critical" label="Docker daemon not running" className="text-sm" />
+      </Section>
+    );
+  }
+  const containers = payload.containers ?? [];
   return (
     <Section title="Docker Containers">
-      <p className="py-2 text-sm text-muted-foreground">
-        Container telemetry is collected (docker_status events feed the /monitor page), but the REST
-        API does not expose it yet. Rendering waits on the additive endpoint proposed in the M004
-        PR2 data-source notes.
-      </p>
+      <dl>
+        <Row label="Daemon">
+          <StatusPill tone="ok" label="Running" />
+        </Row>
+        <Row label="Containers">
+          {value(
+            typeof payload.containers_running === "number" &&
+              typeof payload.containers_total === "number"
+              ? `${payload.containers_running} of ${payload.containers_total} running`
+              : null,
+          )}
+        </Row>
+        {typeof payload.containers_failed === "number" && payload.containers_failed > 0 && (
+          <Row label="Failed">
+            <StatusPill tone="critical" label={String(payload.containers_failed)} />
+          </Row>
+        )}
+        <Row label="Restarts (total)">{value(payload.restart_count_total)}</Row>
+        <Row label="Reported">
+          <time dateTime={docker.data.timestamp}>{formatRelativeTime(docker.data.timestamp)}</time>
+        </Row>
+      </dl>
+      {containers.length > 0 && (
+        <div className="mt-3 flex flex-col gap-2">
+          {containers.map((container, index) => (
+            <ContainerCard key={container.name ?? index} container={container} />
+          ))}
+        </div>
+      )}
     </Section>
   );
 }
@@ -421,7 +533,7 @@ export function NodeDetailView({ fleetId }: { fleetId: string }) {
             </div>
             <InterfacesSection payload={record.payload} />
             <RunningServicesSection />
-            <DockerSection />
+            <DockerSection fleetId={fleetId} />
           </>
         ) : (
           <div className="lg:col-span-1">

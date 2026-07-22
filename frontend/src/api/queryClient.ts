@@ -10,6 +10,10 @@ export const POLL_INTERVALS = {
   fleetAsset: 60_000,
   inventory: 60_000,
   missions: 60_000,
+  /** The most "live" view — auto-refresh requirement (mission §6). */
+  events: 15_000,
+  /** Docker stats arrive from collectors every ~60 s; 30 s keeps them fresh. */
+  dockerStatus: 30_000,
 } as const;
 
 /**

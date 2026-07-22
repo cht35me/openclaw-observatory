@@ -41,10 +41,10 @@ describe("route smoke tests", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("renders the events placeholder at /events", async () => {
+  it("renders the events timeline page at /events", async () => {
     renderRoute("/events");
     expect(await screen.findByRole("heading", { name: "Events" })).toBeInTheDocument();
-    expect(screen.getByText(/arrives with mission m004 pr3/i)).toBeInTheDocument();
+    expect(screen.getByText(/recent telemetry across the fleet/i)).toBeInTheDocument();
   });
 
   it("renders settings at /settings", async () => {

@@ -7,7 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiRequestError, isRetryableError } from "./client";
-import { getFleetAsset, getHostInventory } from "./endpoints";
+import { getDockerStatus, getFleetAsset, getHostInventory, listEvents } from "./endpoints";
 
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -57,5 +57,31 @@ describe("fleet endpoints", () => {
       detail: "No host inventory reported for this fleet_id yet.",
     });
     expect(isRetryableError(error)).toBe(false);
+  });
+});
+
+describe("events endpoints (M004 PR3)", () => {
+  it("requests the bare events path when no params are given", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, []));
+    await listEvents();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/v1/events");
+  });
+
+  it("encodes filters and limit as query parameters", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, []));
+    await listEvents({ collectorId: "RPSG 01", eventType: "heartbeat", limit: 50 });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "/api/v1/events?collector_id=RPSG+01&event_type=heartbeat&limit=50",
+    );
+  });
+
+  it("normalizes the docker-status 404 into a non-retryable ApiError", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(404, { detail: "No docker telemetry reported for this fleet_id yet." }),
+    );
+    const failure = await getDockerStatus("A001").catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(ApiRequestError);
+    expect(isRetryableError(failure)).toBe(false);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/v1/fleet/A001/docker-status");
   });
 });

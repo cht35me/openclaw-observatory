@@ -10,9 +10,14 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { HEALTH_TONES } from "@/features/fleet/status";
 import { useFleet } from "@/features/fleet/useFleetQueries";
 import { useHealth } from "@/features/health/useHealth";
-import { formatRelativeTime, formatUptime } from "@/utils/format";
+import { formatBytes, formatPercent, formatRelativeTime, formatUptime } from "@/utils/format";
 
-import { deriveServices, type ServiceKind, type ServiceRuntime } from "./useServicesData";
+import {
+  deriveServices,
+  useDockerStatuses,
+  type ServiceKind,
+  type ServiceRuntime,
+} from "./useServicesData";
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -23,12 +28,20 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-const TELEMETRY_GAP =
-  "Collected as docker_status telemetry, but not exposed by the REST API yet (M004 PR2 data-source notes).";
-const UPTIME_GAP =
-  "Collector heartbeats carry uptime_seconds, but the registry read model drops it (M004 PR2 data-source notes).";
+/** Why a container-stat field is absent — honest, per situation. */
+function containerGap(service: ServiceRuntime): string {
+  if (service.kind === "host-collector" || service.kind === "agent-collector") {
+    return "Collectors run as systemd processes — no per-process telemetry is collected.";
+  }
+  if (!service.dockerReported) {
+    return "The host has not reported Docker telemetry yet.";
+  }
+  return "No container matching this service in the host's Docker telemetry — it likely runs as a systemd process, which has no per-process telemetry.";
+}
 
 function ServiceCard({ service }: { service: ServiceRuntime }) {
+  const container = service.container;
+  const gap = containerGap(service);
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -53,7 +66,7 @@ function ServiceCard({ service }: { service: ServiceRuntime }) {
             {service.uptimeSeconds !== null ? (
               formatUptime(service.uptimeSeconds)
             ) : (
-              <NotReported reason={UPTIME_GAP} />
+              <NotReported reason="No uptime reported yet (needs a heartbeat carrying uptime_seconds)." />
             )}
           </Row>
           <Row label="Heartbeat">
@@ -65,20 +78,43 @@ function ServiceCard({ service }: { service: ServiceRuntime }) {
               "Never"
             )}
           </Row>
+          {service.failuresTotal !== null && <Row label="Failures">{service.failuresTotal}</Row>}
           <Row label="Restarts">
-            <NotReported reason={TELEMETRY_GAP} />
+            {typeof container?.restart_count === "number" ? (
+              container.restart_count
+            ) : (
+              <NotReported reason={gap} />
+            )}
           </Row>
           <Row label="CPU">
-            <NotReported reason={TELEMETRY_GAP} />
+            {typeof container?.cpu_percent === "number" ? (
+              formatPercent(container.cpu_percent)
+            ) : (
+              <NotReported reason={gap} />
+            )}
           </Row>
           <Row label="RAM">
-            <NotReported reason={TELEMETRY_GAP} />
+            {container?.memory_usage ? (
+              <span title={formatPercent(container.memory_percent)}>{container.memory_usage}</span>
+            ) : typeof container?.memory_percent === "number" ? (
+              formatPercent(container.memory_percent)
+            ) : (
+              <NotReported reason={gap} />
+            )}
           </Row>
           <Row label="RX">
-            <NotReported reason={TELEMETRY_GAP} />
+            {typeof container?.network_rx_bytes === "number" ? (
+              formatBytes(container.network_rx_bytes)
+            ) : (
+              <NotReported reason={gap} />
+            )}
           </Row>
           <Row label="TX">
-            <NotReported reason={TELEMETRY_GAP} />
+            {typeof container?.network_tx_bytes === "number" ? (
+              formatBytes(container.network_tx_bytes)
+            ) : (
+              <NotReported reason={gap} />
+            )}
           </Row>
         </dl>
       </CardContent>
@@ -120,6 +156,7 @@ function ServicesSkeleton() {
 export function ServicesView() {
   const fleet = useFleet();
   const health = useHealth();
+  const dockerByHost = useDockerStatuses(fleet.data);
 
   if (fleet.isPending) return <ServicesSkeleton />;
   if (fleet.isError) {
@@ -135,7 +172,7 @@ export function ServicesView() {
     );
   }
 
-  const services = deriveServices(fleet.data, health.data);
+  const services = deriveServices(fleet.data, health.data, dockerByHost);
 
   return (
     <div className="flex flex-col gap-8">
@@ -145,9 +182,9 @@ export function ServicesView() {
       >
         <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
         <p>
-          Restart count, CPU, RAM, and RX/TX are collected as docker_status telemetry, and collector
-          uptime travels in heartbeats — but the REST API does not expose them yet. Those fields
-          read “Not reported” until the additive endpoints proposed with M004 PR2 land.
+          Restart count, CPU, RAM, and RX/TX come from each host&apos;s Docker telemetry and apply
+          to containerized services only. Services running as plain systemd processes (including the
+          collectors) have no per-process telemetry and honestly read “Not reported”.
         </p>
       </aside>
 
