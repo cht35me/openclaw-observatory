@@ -20,6 +20,7 @@ vi.mock("@/api/endpoints", () => ({
   listFleet: vi.fn(),
   listMissions: vi.fn(),
   getFleetAsset: vi.fn(),
+  getHostInventory: vi.fn(),
   probeAuthenticated: vi.fn(),
 }));
 
