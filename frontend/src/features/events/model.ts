@@ -176,3 +176,15 @@ export function filterEvents(
     return false;
   });
 }
+
+/**
+ * Present events in source-time order (newest first). The backend orders by
+ * *ingestion* time — operationally correct for the stream, but a timeline
+ * displays source timestamps, so a late-arriving or backfilled event must
+ * still slot into its true position. Ties break on ingestion time.
+ */
+export function sortEventsNewestFirst(events: ObservatoryEvent[]): ObservatoryEvent[] {
+  return [...events].sort(
+    (a, b) => b.timestamp.localeCompare(a.timestamp) || b.received_at.localeCompare(a.received_at),
+  );
+}

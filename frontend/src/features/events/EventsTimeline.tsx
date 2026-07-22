@@ -28,6 +28,7 @@ import {
   eventSeverity,
   eventTitle,
   filterEvents,
+  sortEventsNewestFirst,
   type EventFilter,
   type EventSeverity,
 } from "./model";
@@ -174,7 +175,7 @@ export function EventsTimeline() {
     return <ErrorState error={events.error} onRetry={() => void events.refetch()} />;
   }
 
-  const visible = filterEvents(events.data, active);
+  const visible = sortEventsNewestFirst(filterEvents(events.data, active));
 
   return (
     <div className="flex flex-col gap-6">

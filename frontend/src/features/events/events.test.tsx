@@ -12,7 +12,14 @@ import { makeEvent } from "@/test/fixtures";
 import { renderRoute } from "@/test/utils";
 import type { ObservatoryEvent } from "@/types";
 
-import { eventDetail, eventKind, eventSeverity, eventTitle, filterEvents } from "./model";
+import {
+  eventDetail,
+  eventKind,
+  eventSeverity,
+  eventTitle,
+  filterEvents,
+  sortEventsNewestFirst,
+} from "./model";
 
 vi.mock("@/api/endpoints", () => ({
   getHealth: vi.fn(),
@@ -164,6 +171,24 @@ describe("event model (documented chip mapping)", () => {
         }),
       ),
     ).toBe("info");
+  });
+
+  it("presents events in source-time order, newest first", () => {
+    const events = [
+      makeEvent({
+        id: "old",
+        timestamp: "2026-07-22T04:00:00Z",
+        received_at: "2026-07-22T06:00:00Z",
+      }),
+      makeEvent({
+        id: "new",
+        timestamp: "2026-07-22T05:00:00Z",
+        received_at: "2026-07-22T05:00:01Z",
+      }),
+    ];
+    // A late-arriving event (newer ingestion, older source time) still slots
+    // into its true timeline position.
+    expect(sortEventsNewestFirst(events).map((e) => e.id)).toEqual(["new", "old"]);
   });
 
   it("never drops unknown event types (schema-free stream)", () => {
