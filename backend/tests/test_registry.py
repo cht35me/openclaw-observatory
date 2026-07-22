@@ -203,6 +203,72 @@ def test_heartbeat_updates_derived_view(client: TestClient) -> None:
     assert hb["collector_type"] == "raspberry"
     assert hb["collector_version"] == "1.2.0"
     assert hb["schema_version"] == 3
+    # M004 PR3 (additive): collector process uptime + cumulative failures
+    # surface in the read model instead of being dropped.
+    assert hb["uptime_seconds"] == 12.5
+    assert hb["failures_total"] == 0
+
+
+def _post_heartbeat(client: TestClient, payload: dict) -> None:
+    body = {
+        "collector_id": "RPSG01",
+        "timestamp": datetime.now(UTC).isoformat(),
+        "event_type": "heartbeat",
+        "payload": {"collector_type": "raspberry", "collector_version": "1.0.0", **payload},
+    }
+    response = client.post("/api/v1/events", json=body, headers=auth_headers("test-key-rpsg01"))
+    assert response.status_code == 202
+
+
+def _store_raw_heartbeat(client: TestClient, payload: dict) -> None:
+    """Insert a heartbeat event directly into storage, bypassing ingestion
+    validation — the shape of legacy/foreign data the read model must survive."""
+    from uuid import uuid4
+
+    from app.models.event import Event
+
+    event = Event(
+        id=uuid4(),
+        collector_id="RPSG01",
+        timestamp=datetime.now(UTC),
+        event_type="heartbeat",
+        payload=payload,
+        schema_version=1,
+        received_at=datetime.now(UTC),
+    )
+    client.portal.call(lambda: client.app.state.storage.insert_event(event))
+
+
+def test_heartbeat_view_tolerates_missing_uptime_and_failures(client: TestClient) -> None:
+    """Regression (M004 PR3): heartbeats without the new fields — every
+    pre-M004 stored event — must yield null, never fail or fabricate."""
+    _store_raw_heartbeat(client, {"collector_type": "raspberry"})
+    hb = client.get("/api/v1/fleet/RPSG01", headers=auth_headers()).json()["last_heartbeat"]
+    assert hb["uptime_seconds"] is None
+    assert hb["failures_total"] is None
+
+
+def test_heartbeat_view_nulls_junk_typed_uptime_and_failures(client: TestClient) -> None:
+    """Stored payloads are schema-free: junk-typed legacy values become
+    null in the read model, not 500s (ingestion validates, storage may not)."""
+    _store_raw_heartbeat(client, {"uptime_seconds": "soon", "failures_total": "many"})
+    hb = client.get("/api/v1/fleet/RPSG01", headers=auth_headers()).json()["last_heartbeat"]
+    assert hb["uptime_seconds"] is None
+    assert hb["failures_total"] is None
+
+    # Booleans are ints in Python — explicitly excluded, never coerced.
+    _store_raw_heartbeat(client, {"uptime_seconds": True, "failures_total": False})
+    hb = client.get("/api/v1/fleet/RPSG01", headers=auth_headers()).json()["last_heartbeat"]
+    assert hb["uptime_seconds"] is None
+    assert hb["failures_total"] is None
+
+
+def test_heartbeat_view_coerces_integer_uptime(client: TestClient) -> None:
+    """Integer uptimes (some collectors round) surface as floats end-to-end."""
+    _post_heartbeat(client, {"uptime_seconds": 3600, "failures_total": 2})
+    hb = client.get("/api/v1/fleet/RPSG01", headers=auth_headers()).json()["last_heartbeat"]
+    assert hb["uptime_seconds"] == 3600.0
+    assert hb["failures_total"] == 2
 
 
 def test_registry_has_no_write_routes(client: TestClient) -> None:

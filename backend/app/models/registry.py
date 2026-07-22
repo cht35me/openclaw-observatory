@@ -193,7 +193,14 @@ class FleetAsset(BaseModel):
 
 
 class HeartbeatInfo(BaseModel):
-    """Latest heartbeat details for an asset (derived from the event stream)."""
+    """Latest heartbeat details for an asset (derived from the event stream).
+
+    ``uptime_seconds`` and ``failures_total`` (M004 PR3, additive): collector
+    heartbeat payloads have always carried both, but the read model dropped
+    them, so the frontend could not answer "how long has this collector been
+    up". Optional — older events (or foreign collectors) may omit them, and
+    consumers must tolerate ``null``.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -203,6 +210,8 @@ class HeartbeatInfo(BaseModel):
     collector_version: str | None = None
     collector_type: str | None = None
     schema_version: int | None = None
+    uptime_seconds: float | None = None
+    failures_total: int | None = None
 
 
 class FleetAssetView(BaseModel):

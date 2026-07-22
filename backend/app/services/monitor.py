@@ -39,6 +39,7 @@ from app.config import Settings
 from app.models.event import Event
 from app.models.mission import MissionRecord
 from app.models.registry import AssetType, Connectivity, FleetAssetView, HealthStatus
+from app.models.telemetry import DOCKER_STATUS_EVENT_TYPE
 from app.services.offline import OFFLINE_EVENT_TYPE, ONLINE_EVENT_TYPE
 from app.services.pipeline import MISSION_UPDATE_EVENT_TYPE
 from app.services.registry import SYSTEM_METRICS_EVENT_TYPE, RegistryService
@@ -47,7 +48,8 @@ from app.storage.base import EventStorage, HostInventoryStorage, MissionStorage
 from app.version import BUILD_TIMESTAMP, GIT_COMMIT
 
 #: Event types consumed by the monitor beyond the registry read-model.
-DOCKER_STATUS_EVENT_TYPE = "docker_status"
+#: (docker_status moved to app.models.telemetry when it gained a REST read
+#: route in M004 PR3; re-exported here for existing imports.)
 AGENT_STATUS_EVENT_TYPE = "agent_status"
 
 #: Page auto-refresh interval (seconds) — meta refresh, no JavaScript.
