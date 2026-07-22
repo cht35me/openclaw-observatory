@@ -1,17 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { listFleet, listMissions } from "@/api/endpoints";
+import { listMissions } from "@/api/endpoints";
 import { POLL_INTERVALS } from "@/api/queryClient";
 import { queryKeys } from "@/api/queryKeys";
 import type { Connectivity, FleetAssetView, HealthStatus, MissionView } from "@/types";
 
-export function useFleet() {
-  return useQuery({
-    queryKey: queryKeys.fleet,
-    queryFn: ({ signal }) => listFleet(signal),
-    refetchInterval: POLL_INTERVALS.fleet,
-  });
-}
+// The fleet query moved to the fleet feature in PR2; re-exported here so the
+// dashboard keeps one import site for its data hooks.
+export { useFleet } from "@/features/fleet/useFleetQueries";
 
 export function useMissions() {
   return useQuery({
