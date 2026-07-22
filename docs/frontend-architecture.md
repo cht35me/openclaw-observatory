@@ -218,10 +218,13 @@ marked read-only). Small, additive, and forward-compatible with RBAC; could
 land in PR3 if the supervisor wants it before RBAC.
 
 - **Trade-off (explicit, Principle 14):** `localStorage` is readable by any
-  JS on the origin. Accepted because exposure is bounded by the
-  tailnet/loopback network boundary (SD-003), the blast radius of a leaked
-  key is bounded to reads plus `UI01`-attributed telemetry (SD-017), the key
-  is individually revocable, and the controls in §9 below hold. Alternatives
+  JS on the origin. Said plainly: **stealing this key does not just grant
+  reads — it grants the ability to ingest forged telemetry into the event
+  stream, attributed to `UI01`** (never to any other asset, per SD-017
+  identity binding). Accepted because exposure is bounded by the
+  tailnet/loopback network boundary (SD-003), forged events are
+  identifiable and auditable by their `UI01` provenance, the key is
+  individually revocable, and the controls in §9 below hold. Alternatives
   (session cookie + login endpoint, or proxy-injected key) require backend
   auth changes — out of scope.
 - When RBAC arrives, `UI01` becomes a read-only role holder with no further
