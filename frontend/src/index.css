@@ -1,0 +1,84 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Semantic theme tokens (docs/frontend-architecture.md §4).
+ * Dark theme first: `.dark` is the default (set on <html> in index.html).
+ * The :root block keeps a light theme possible later without code changes.
+ * Status hues are muted on purpose — this is an operations console, and
+ * status is always paired with a text label or icon, never color alone.
+ */
+@layer base {
+  :root {
+    --background: 0 0% 98%;
+    --foreground: 224 15% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 224 15% 12%;
+    --muted: 220 12% 92%;
+    --muted-foreground: 222 10% 40%;
+    --border: 220 12% 86%;
+    --input: 220 12% 86%;
+    --ring: 210 80% 50%;
+    --primary: 210 80% 44%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 220 12% 92%;
+    --secondary-foreground: 224 15% 12%;
+    --accent: 220 12% 90%;
+    --accent-foreground: 224 15% 12%;
+    --destructive: 0 62% 44%;
+    --destructive-foreground: 0 0% 100%;
+    --status-ok: 150 45% 34%;
+    --status-warn: 38 70% 40%;
+    --status-critical: 0 62% 44%;
+    --status-offline: 222 10% 46%;
+    --status-unknown: 222 10% 56%;
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --background: 222 18% 8%;
+    --foreground: 216 18% 88%;
+    --card: 222 16% 11%;
+    --card-foreground: 216 18% 88%;
+    --muted: 222 14% 16%;
+    --muted-foreground: 218 10% 62%;
+    --border: 222 12% 20%;
+    --input: 222 12% 22%;
+    --ring: 208 70% 58%;
+    --primary: 208 70% 58%;
+    --primary-foreground: 222 18% 8%;
+    --secondary: 222 14% 16%;
+    --secondary-foreground: 216 18% 88%;
+    --accent: 222 14% 18%;
+    --accent-foreground: 216 18% 88%;
+    --destructive: 0 55% 55%;
+    --destructive-foreground: 222 18% 8%;
+    --status-ok: 150 42% 52%;
+    --status-warn: 40 70% 58%;
+    --status-critical: 0 60% 62%;
+    --status-offline: 218 10% 55%;
+    --status-unknown: 218 8% 48%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    color-scheme: dark;
+  }
+
+  html:not(.dark) {
+    color-scheme: light;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+  }
+
+  /* Visible focus states everywhere (accessibility requirement). */
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+}
