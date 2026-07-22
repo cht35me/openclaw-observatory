@@ -195,13 +195,37 @@ to insufficient permissions"* even for the user's **own** journal (the
 directory is not traversable). Post-reboot forensics are impossible on top
 of that, because the previous boot's logs are gone.
 
+> **Raspberry Pi OS (Trixie) caveat:** the OS ships a vendor drop-in
+> `/usr/lib/systemd/journald.conf.d/40-rpi-volatile-storage.conf` with
+> `Storage=volatile`, which **overrides** the `Storage=auto` default. On
+> such hosts, creating `/var/log/journal` alone does **nothing** — journald
+> stays volatile. You must add an admin drop-in that sorts *after* the
+> vendor one (verified live on this fleet's Pi, 2026-07-22).
+
 Enable persistent journald **once per host** (requires sudo; this is the
 least-privilege fix — do *not* add the service user to `adm` or
-`systemd-journal`, which would expose every other unit's logs):
+`systemd-journal`, which would expose every other unit's logs).
+
+**Step 1 — override any vendor `Storage=` drop-in** (required on Raspberry
+Pi OS Trixie; harmless elsewhere). Create
+`/etc/systemd/journald.conf.d/60-observatory-persistent.conf`:
+
+```ini
+[Journal]
+Storage=persistent
+SystemMaxUse=200M
+```
+
+Drop-ins in `/etc/` take precedence over same-or-lower-sorting files in
+`/usr/lib/`, and `60-…` sorts after the vendor `40-…`, so `persistent`
+wins. `SystemMaxUse` caps disk usage — sensible on SD-card hosts.
+
+**Step 2 — create the persistent directory, apply ACLs, and flush:**
 
 ```bash
 sudo mkdir -p /var/log/journal
 sudo systemd-tmpfiles --create --prefix=/var/log/journal
+sudo systemctl restart systemd-journald
 sudo journalctl --flush
 ```
 
@@ -217,6 +241,13 @@ journalctl --user -n 1 --no-pager   # must print a line, not a permissions error
 
 `deploy/scripts/install.sh` warns (without failing) when the journal is
 unreadable, pointing here.
+
+To confirm which `Storage=` setting is actually in effect (and which file
+set it):
+
+```bash
+systemd-analyze cat-config systemd/journald.conf | grep -B2 '^Storage='
+```
 
 ### Reboot-recovery validation checklist
 

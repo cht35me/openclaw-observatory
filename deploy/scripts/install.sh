@@ -79,15 +79,20 @@ else
 fi
 
 # 4. Journal readability check (M003.6 §2) — WARN only, never fail: on a
-#    volatile-journal host (Storage=auto without /var/log/journal/<id>) the
+#    volatile-journal host (Storage=auto without /var/log/journal/<id>, or a
+#    vendor Storage=volatile drop-in as on Raspberry Pi OS Trixie) the
 #    service user cannot read even its own user journal, which cripples
 #    post-incident forensics. The fix is a one-time sudo host op.
 if systemd_enabled && ! journalctl --user -n 1 --no-pager >/dev/null 2>&1; then
   warn "journalctl --user is not readable for $USER — service logs are"
   warn "invisible and lost on reboot. Enable persistent journald (one-time,"
   warn "needs sudo — docs/deployment.md §12 'Persistent journald'):"
+  warn "  # Raspberry Pi OS Trixie ships Storage=volatile in"
+  warn "  # /usr/lib/systemd/journald.conf.d/40-rpi-volatile-storage.conf —"
+  warn "  # override it first via /etc/systemd/journald.conf.d/ (see docs)."
   warn "  sudo mkdir -p /var/log/journal"
   warn "  sudo systemd-tmpfiles --create --prefix=/var/log/journal"
+  warn "  sudo systemctl restart systemd-journald"
   warn "  sudo journalctl --flush"
 fi
 
