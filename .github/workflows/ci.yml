@@ -4,6 +4,9 @@
 #   Backend unit tests · Collector tests · ClickHouse integration tests ·
 #   Ruff lint & format
 #
+# Mission M004 adds a fifth job: Frontend checks & build (Node 22 — matches
+# the RPSG01 host runtime v22.x). Add it to branch protection once merged.
+#
 # Conventions:
 # - Python 3.13 everywhere (matches the RPSG01 deployment runtime).
 # - Backend pytest runs FROM backend/ (Settings resolves .env relative to
@@ -110,6 +113,32 @@ jobs:
             exit 1
           fi
           grep -qE '[1-9][0-9]* passed' pytest-clickhouse.log
+
+  frontend:
+    name: Frontend checks & build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies (locked)
+        run: npm ci
+      - name: ESLint
+        run: npm run lint
+      - name: Prettier format check
+        run: npm run format:check
+      - name: TypeScript typecheck (strict)
+        run: npm run typecheck
+      - name: Unit & component tests (Vitest)
+        run: npm test
+      - name: Production build
+        run: npm run build
 
   ruff:
     name: Ruff lint & format
