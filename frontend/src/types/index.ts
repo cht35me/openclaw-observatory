@@ -9,6 +9,17 @@ export type {
   HeartbeatInfo,
   LifecycleStatus,
 } from "./fleet";
+export type {
+  DefaultRoute,
+  HardwareInventory,
+  HostInventoryPayload,
+  HostInventoryRecord,
+  MaintenanceInventory,
+  NetworkInterface,
+  NetworkInventory,
+  OsInventory,
+  StorageDevice,
+} from "./inventory";
 export { MISSION_STATES } from "./mission";
 export type { MissionState, MissionView } from "./mission";
 export type { ObservatoryEvent } from "./event";

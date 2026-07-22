@@ -4,5 +4,6 @@ export const queryKeys = {
   health: ["health"] as const,
   fleet: ["fleet"] as const,
   fleetAsset: (fleetId: string) => ["fleet", fleetId] as const,
+  hostInventory: (fleetId: string) => ["fleet", fleetId, "inventory"] as const,
   missions: ["missions"] as const,
 };

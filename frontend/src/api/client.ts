@@ -35,6 +35,15 @@ export function isRetryableError(error: unknown): boolean {
   return error.error.kind === "network" || error.error.status >= 500;
 }
 
+/**
+ * True when the error is the backend's 404 — for fleet routes that means an
+ * unknown Fleet ID *or* "nothing reported yet" (a normal condition callers
+ * branch on, not a failure).
+ */
+export function isNotFoundError(error: unknown): boolean {
+  return isApiRequestError(error) && error.error.kind === "http" && error.error.status === 404;
+}
+
 /** True when the error means "the API key is missing, wrong, or not authorized". */
 export function isAuthError(error: unknown): boolean {
   return (
