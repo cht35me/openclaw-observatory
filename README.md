@@ -255,6 +255,29 @@ The test suite runs entirely offline using an in-memory storage backend; tests i
 `tests/test_clickhouse_integration.py` execute only when a ClickHouse server is
 reachable (e.g. via `docker compose up clickhouse`).
 
+## Frontend — Operations Console (M004)
+
+[frontend/](frontend/) contains the React operations console (Vite +
+TypeScript strict + React Router + TanStack Query + TailwindCSS/shadcn-ui):
+dashboard, fleet cards, node details (Host Inventory + Docker), services
+runtime view, and an auto-refreshing events timeline. Design and rationale:
+[docs/frontend-architecture.md](docs/frontend-architecture.md).
+
+```bash
+cd frontend
+npm ci                 # locked dependencies (package-lock.json)
+npm run dev            # dev server; proxies /api + /health to 127.0.0.1:8000
+npm test -- --run      # Vitest + React Testing Library
+npm run lint && npm run format:check && npm run typecheck
+npm run build          # production build → frontend/dist/
+```
+
+In production the backend serves `frontend/dist` itself, same-origin — no
+extra process or proxy; without a build it runs exactly as before. See
+[docs/deployment.md](docs/deployment.md) §13. The console authenticates with
+a dedicated `UI01` API key entered under Settings (SD-017); the zero-JS
+`/monitor` page remains the emergency panel.
+
 ## Repository Structure
 
 ```text

@@ -134,6 +134,24 @@ polished platform).
 **Gate:** supervisor can answer "what is the fleet doing right now?" from the dashboard
 alone.
 
+### M004 follow-ups (recorded at PR3, awaiting scheduling)
+
+- **Enforced read-only authorization for the `UI01` identity (security).**
+  Today every authenticated identity may read *and* ingest events (SD-017
+  binds ingestion to the caller's own `collector_id`). A leaked UI key can
+  therefore submit forged telemetry attributed to `UI01`. Follow-up: an
+  additive read-only marker per identity (e.g. a `READ_ONLY_IDS` setting)
+  enforced with one check in the ingestion route, forward-compatible with
+  the RBAC milestone — see
+  [frontend-architecture.md](frontend-architecture.md) §8.
+- **Running services (systemd) collector section (deferred from M004).**
+  The host collector does not observe systemd services, so the Node
+  details “Running Services” section honestly reads “Not reported”.
+  Follow-up: an additive `services` section in the host-collector
+  inventory payload (collector change only; the backend inventory
+  projection is schema-flexible) — see
+  [frontend-architecture.md](frontend-architecture.md) §11 item 3.
+
 ## Phase 4 — Production Deployment
 
 1. **VPS staging deployment** (containerized, tailnet-only exposure, secrets management,
