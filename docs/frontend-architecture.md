@@ -168,29 +168,90 @@ mounts the built SPA via `StaticFiles` (additive change only — e.g.
   stays zero-backend-change. Until then the frontend runs via `vite dev`
   or `vite preview` on the LAN.
 
+**Mount design (supervisor gate requirements, binding for the PR3
+implementation):**
+
+- **Routing precedence is preserved:** `/api/*`, `/health`, `/metrics`,
+  `/monitor`, and `/docs`/`/openapi.json` are registered API routes and
+  always win; the SPA mount only ever serves paths no API route claims.
+- **No blanket SPA fallback.** Asset requests (`/assets/*`, `/favicon.svg`,
+  anything with a file extension) that don't exist return **404** — a
+  missing asset must never silently deliver `index.html`. The SPA
+  `index.html` fallback applies only to extension-less, non-API navigation
+  paths (`/fleet/RPSG01`, `/settings`, …). Unknown `/api/...` paths keep
+  returning the backend's own 404, never the SPA.
+- **Frontend is optional at runtime:** the mount is conditional on
+  `frontend/dist/` existing. The backend test suite (and any deployment
+  without a built frontend) must remain fully runnable and green with no
+  `dist/` present — CI enforces this implicitly because backend jobs never
+  build the frontend.
+
 ## 8. Proposal (b): Browser Auth — **Proposed — Gate review at PR1**
 
 **No auth redesign** (explicitly out of scope). Reuse SD-017 exactly:
 
-- The operator adds one **dedicated read-only UI identity** to the backend's
+- The operator adds one **dedicated named UI identity** to the backend's
   existing `API_KEYS` config, e.g. `UI01:<random-key>` (key → one Fleet
-  identity, individually revocable, least privilege §2).
+  identity, individually revocable — security.md §2).
 - The key is entered **once** in the frontend Settings screen, kept in
   `localStorage`, and sent as `X-API-Key` on every REST read — identical to
   collectors. `/health` stays unauthenticated (SD-013) and doubles as the
   reachability probe; Settings also verifies the key against an authed
   endpoint (`/api/v1/missions`).
-- **Trade-off (explicit, Principle 14):** `localStorage` is readable by any
-  JS on the origin. Accepted because: the key is read-only in practice
-  (the UI only performs GETs; a leaked UI key cannot spoof telemetry for
-  meaningful assets beyond `UI01` per SD-017 identity binding), exposure is
-  bounded by the tailnet/loopback network boundary (SD-003), and the key is
-  individually revocable. Alternatives (session cookie + login endpoint, or
-  proxy-injected key) require backend auth changes — out of scope.
-- When RBAC arrives (architecture §2.8), `UI01` becomes a read-only role
-  holder with no further frontend change.
 
-## 9. Testing and Quality Gates
+**What the UI identity is — and is not (verified against
+`backend/app/auth.py` and the v1 routes, supervisor gate requirement):**
+the backend has a single `require_collector` dependency guarding *both* the
+read endpoints and `POST /api/v1/events`. Authorization today is
+*all-authenticated-identities-may-read*, and any identity may also ingest
+events — restricted by SD-017 to its **own** `collector_id`. `UI01` is
+therefore **not a read-only credential**: it is a *dedicated named identity
+for audit and individual revocation*. A leaked UI key could read fleet data
+and submit telemetry **as `UI01`** (never as another asset). Per-role
+read-only enforcement arrives with the RBAC milestone (architecture §2.8).
+
+**Additive hardening option (proposal only — no backend change in PR1):**
+an optional read-only marker per identity (e.g. a `READ_ONLY_IDS` setting
+listing identities, or an `API_KEYS` entry suffix), enforced by one additive
+check in the ingestion route (`403` when the authenticated subject is
+marked read-only). Small, additive, and forward-compatible with RBAC; could
+land in PR3 if the supervisor wants it before RBAC.
+
+- **Trade-off (explicit, Principle 14):** `localStorage` is readable by any
+  JS on the origin. Accepted because exposure is bounded by the
+  tailnet/loopback network boundary (SD-003), the blast radius of a leaked
+  key is bounded to reads plus `UI01`-attributed telemetry (SD-017), the key
+  is individually revocable, and the controls in §9 below hold. Alternatives
+  (session cookie + login endpoint, or proxy-injected key) require backend
+  auth changes — out of scope.
+- When RBAC arrives, `UI01` becomes a read-only role holder with no further
+  frontend change.
+
+## 9. localStorage Threat Model — Controls (all hold in the implementation)
+
+The stored key's primary risk is exfiltration by JavaScript running on the
+origin, or accidental leakage through logs and URLs. Controls, each of which
+is true of the shipped code and enforced by review/CI:
+
+1. **Zero external code or assets.** No CDN scripts, no external fonts
+   (system font stack), no analytics, no third-party requests of any kind.
+   Everything is bundled by Vite and self-hosted; the only network calls the
+   app makes are same-origin `/health` and `/api/v1/*`. This is the main
+   XSS-surface reducer: no foreign origin can inject code.
+2. **The key never appears in URLs, query strings, logs, or error
+   surfaces.** It travels exclusively in the `X-API-Key` request header.
+   Error normalization builds `ApiError` from the response status/body
+   only — request headers are never copied into errors, telemetry, or
+   console output (regression-tested in `client.test.ts`).
+3. **Dependencies are locked.** `package-lock.json` is committed and CI
+   installs with `npm ci` — no floating resolutions; supply-chain drift
+   requires a reviewed lockfile diff.
+4. **Operator can forget the key.** Settings has an explicit “Forget key”
+   action that removes it from `localStorage` and clears the TanStack Query
+   cache (no authenticated payloads linger in memory beyond the page
+   session).
+
+## 10. Testing and Quality Gates
 
 - **TypeScript strict** (`strict: true`, plus `noUncheckedIndexedAccess`),
   `tsc --noEmit` clean.
@@ -206,7 +267,7 @@ mounts the built SPA via `StaticFiles` (additive change only — e.g.
   libs, code-split routes when PR2/PR3 grow, gzip/precompressed assets at
   serve time, bundle size reported in every PR.
 
-## 10. Out of Scope (unchanged from mission)
+## 11. Out of Scope (unchanged from mission)
 
 No Bitaxe dashboards, no Grafana replacement, no historical analytics, no
 editing/remote administration, no authentication redesign, no OpenClaw
