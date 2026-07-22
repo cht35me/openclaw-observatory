@@ -3,7 +3,7 @@ import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { getApiKey } from "@/api/apiKey";
+import { getApiKey, setApiKey } from "@/api/apiKey";
 import { ApiRequestError } from "@/api/client";
 import { healthFixture } from "@/test/fixtures";
 import { renderRoute } from "@/test/utils";
@@ -36,6 +36,19 @@ describe("settings", () => {
 
     expect(getApiKey()).toBe("UI01-test-key");
     expect(screen.getByText("Saved.")).toBeInTheDocument();
+  });
+
+  it("forgets the key: wipes localStorage and clears the query cache", async () => {
+    setApiKey("UI01-old-key");
+    const user = userEvent.setup();
+    renderRoute("/settings");
+
+    await user.click(screen.getByRole("button", { name: "Forget key" }));
+
+    expect(getApiKey()).toBeNull();
+    expect(window.localStorage.getItem("observatory.api-key")).toBeNull();
+    expect(screen.getByLabelText("API key")).toHaveValue("");
+    expect(screen.getByText(/key forgotten/i)).toBeInTheDocument();
   });
 
   it("reports reachability and key acceptance on a successful test", async () => {

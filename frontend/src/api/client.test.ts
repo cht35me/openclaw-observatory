@@ -38,6 +38,15 @@ describe("apiFetch error normalization", () => {
     expect(isRetryableError(error)).toBe(false);
   });
 
+  it("never copies the API key into normalized errors (threat model §9.2)", async () => {
+    setApiKey("UI01-super-secret");
+    fetchMock.mockResolvedValueOnce(jsonResponse(401, { detail: "Invalid API key." }));
+    const failure = await apiFetch("/api/v1/fleet").catch((error: unknown) => error);
+    const error = failure as ApiRequestError;
+    expect(JSON.stringify(error.error)).not.toContain("UI01-super-secret");
+    expect(error.message).not.toContain("UI01-super-secret");
+  });
+
   it("normalizes 5xx into a retryable http ApiError", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(503, { detail: "Storage backend unavailable." }));
     const failure = await apiFetch("/health").catch((error: unknown) => error);

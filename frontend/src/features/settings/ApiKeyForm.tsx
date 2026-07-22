@@ -63,16 +63,26 @@ async function runConnectionTest(key: string): Promise<TestOutcome> {
 export function ApiKeyForm() {
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState(() => getApiKey() ?? "");
-  const [saved, setSaved] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
   const [outcome, setOutcome] = useState<TestOutcome | null>(null);
 
   const handleSave = (event: FormEvent) => {
     event.preventDefault();
     setApiKey(draft.trim() || null);
-    setSaved(true);
+    setNotice("Saved.");
     // New identity — drop every cached read and refetch with the new key.
     void queryClient.invalidateQueries();
+  };
+
+  // Threat-model control §9.4: wipe the key from localStorage AND drop every
+  // cached authenticated payload from the query cache.
+  const handleForget = () => {
+    setApiKey(null);
+    setDraft("");
+    setOutcome(null);
+    queryClient.clear();
+    setNotice("Key forgotten — removed from this browser.");
   };
 
   const handleTest = async () => {
@@ -107,7 +117,7 @@ export function ApiKeyForm() {
               value={draft}
               onChange={(event) => {
                 setDraft(event.target.value);
-                setSaved(false);
+                setNotice(null);
                 setOutcome(null);
               }}
             />
@@ -122,9 +132,12 @@ export function ApiKeyForm() {
             >
               {testing ? "Testing…" : "Test connection"}
             </Button>
-            {saved && (
+            <Button type="button" variant="destructive" onClick={handleForget}>
+              Forget key
+            </Button>
+            {notice && (
               <span role="status" className="text-sm text-muted-foreground">
-                Saved.
+                {notice}
               </span>
             )}
           </div>
