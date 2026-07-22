@@ -2,10 +2,11 @@ import { ClipboardList } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { ErrorState } from "@/components/ErrorState";
-import { StatusPill, type StatusTone } from "@/components/StatusPill";
+import { StatusPill } from "@/components/StatusPill";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { HEALTH_TONES } from "@/features/fleet/status";
 import type { HealthStatus } from "@/types";
 import { formatUptime } from "@/utils/format";
 
@@ -17,14 +18,6 @@ import {
   useFleet,
   useMissions,
 } from "./useDashboardData";
-
-const HEALTH_TONES: Record<HealthStatus, StatusTone> = {
-  Healthy: "ok",
-  Warning: "warn",
-  Critical: "critical",
-  Offline: "offline",
-  Unknown: "unknown",
-};
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (

@@ -270,7 +270,44 @@ is true of the shipped code and enforced by review/CI:
   libs, code-split routes when PR2/PR3 grow, gzip/precompressed assets at
   serve time, bundle size reported in every PR.
 
-## 11. Out of Scope (unchanged from mission)
+## 11. PR2 — Fleet, Node Details, Services: Data Sources and Known Gaps
+
+PR2 renders exclusively from existing endpoints (mission §8: no backend
+redesign, PR2 makes **zero** backend changes):
+
+| View | Source | Poll |
+| --- | --- | --- |
+| `/fleet` cards | `GET /api/v1/fleet` (+ per-node `GET /api/v1/fleet/{id}/inventory` for hardware identity, cached under the same key the details page uses) | 30 s / 60 s |
+| `/fleet/:fleetId` | `GET /api/v1/fleet/{id}` + `GET /api/v1/fleet/{id}/inventory` (M003.5 Host Inventory: hardware, os, storage, network, maintenance) | 60 s |
+| `/services` | `GET /api/v1/fleet` (identity, heartbeat, health per asset) + `GET /health` (backend uptime) | 30 s |
+
+The inventory payload is schema-flexible on the backend
+(`dict[str, Any]`); the TypeScript mirror (`types/inventory.ts`) types every
+section and field as optional, and every section renders a "not reported"
+state when absent — partial inventory is expected, not an error. The
+inventory route's **404 is a normal condition** ("nothing reported yet", the
+case for every agent/service asset) and is branched on, never retried.
+
+**Known gaps (rendered as honest “Not reported”, never fake values):**
+
+1. **Service/collector uptime** — heartbeat payloads carry
+   `uptime_seconds` (and `failures_total`), but the registry read model
+   (`HeartbeatInfo`) drops both, so `GET /api/v1/fleet` cannot answer
+   "how long has this collector been up". *Additive proposal:* include
+   `uptime_seconds`/`failures_total` in `HeartbeatInfo`.
+2. **Restart count, CPU, RAM, RX/TX per service** — collected as
+   `docker_status` telemetry (consumed by `/monitor`), but no REST read
+   endpoint exposes latest per-type telemetry. *Additive proposal:*
+   `GET /api/v1/fleet/{id}/telemetry/{event_type}` (latest event payload).
+3. **Running services (systemd)** — not collected at all today; the host
+   collector reports hardware/os/storage/network/maintenance only.
+   *Proposal:* an additive `services` inventory section in the host
+   collector (collector change, no backend schema change needed).
+
+All three proposals await supervisor decision (recorded in the M004 PR2
+description); none is implemented in PR2.
+
+## 12. Out of Scope (unchanged from mission)
 
 No Bitaxe dashboards, no Grafana replacement, no historical analytics, no
 editing/remote administration, no authentication redesign, no OpenClaw

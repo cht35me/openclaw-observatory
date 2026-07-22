@@ -1,6 +1,6 @@
 /** Endpoint definitions — the only place URL paths appear. */
 
-import type { FleetAssetView, HealthResponse, MissionView } from "@/types";
+import type { FleetAssetView, HealthResponse, HostInventoryRecord, MissionView } from "@/types";
 
 import { apiFetch } from "./client";
 
@@ -17,6 +17,20 @@ export function listFleet(signal?: AbortSignal): Promise<FleetAssetView[]> {
 /** GET /api/v1/fleet/{fleetId} — one registry asset (404 when unknown). */
 export function getFleetAsset(fleetId: string, signal?: AbortSignal): Promise<FleetAssetView> {
   return apiFetch<FleetAssetView>(`/api/v1/fleet/${encodeURIComponent(fleetId)}`, { signal });
+}
+
+/**
+ * GET /api/v1/fleet/{fleetId}/inventory — latest Host Inventory projection
+ * (M003.5). 404 when the Fleet ID is unknown *or* the host has not reported
+ * inventory yet — callers must treat 404 as "no inventory", not as failure.
+ */
+export function getHostInventory(
+  fleetId: string,
+  signal?: AbortSignal,
+): Promise<HostInventoryRecord> {
+  return apiFetch<HostInventoryRecord>(`/api/v1/fleet/${encodeURIComponent(fleetId)}/inventory`, {
+    signal,
+  });
 }
 
 /** GET /api/v1/missions — every tracked mission with lifecycle state. */

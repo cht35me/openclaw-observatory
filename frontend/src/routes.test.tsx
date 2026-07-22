@@ -22,20 +22,23 @@ describe("route smoke tests", () => {
     expect(screen.getByRole("navigation", { name: "Primary" })).toBeInTheDocument();
   });
 
-  it("renders the fleet placeholder at /fleet", async () => {
+  it("renders the fleet page (loading skeletons) at /fleet", async () => {
     renderRoute("/fleet");
     expect(await screen.findByRole("heading", { name: "Fleet" })).toBeInTheDocument();
-    expect(screen.getByText(/arrives with mission m004 pr2/i)).toBeInTheDocument();
+    // Pending fetch → skeleton cards, no error and no crash.
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("renders the node detail placeholder at /fleet/:fleetId", async () => {
+  it("renders the node detail page (loading state) at /fleet/:fleetId", async () => {
     renderRoute("/fleet/RPSG01");
-    expect(await screen.findByRole("heading", { name: "RPSG01" })).toBeInTheDocument();
+    expect(await screen.findByRole("main")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("renders the services placeholder at /services", async () => {
+  it("renders the services page (loading skeletons) at /services", async () => {
     renderRoute("/services");
     expect(await screen.findByRole("heading", { name: "Services" })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("renders the events placeholder at /events", async () => {
