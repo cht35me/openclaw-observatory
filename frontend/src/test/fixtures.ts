@@ -1,4 +1,11 @@
-import type { FleetAssetView, HealthResponse, HostInventoryRecord, MissionView } from "@/types";
+import type {
+  FleetAssetView,
+  HealthResponse,
+  HostInventoryRecord,
+  MissionView,
+  ObservatoryEvent,
+  TelemetrySnapshot,
+} from "@/types";
 
 export const healthFixture: HealthResponse = {
   status: "ok",
@@ -34,6 +41,8 @@ export function makeAsset(overrides: Partial<FleetAssetView> = {}): FleetAssetVi
       collector_version: "0.3.1",
       collector_type: "host",
       schema_version: 1,
+      uptime_seconds: 93_784,
+      failures_total: 0,
     },
     connectivity: "online",
     health: "Healthy",
@@ -153,6 +162,57 @@ export function makeMission(overrides: Partial<MissionView> = {}): MissionView {
     pr_ref: null,
     commit_sha: null,
     updated_at: "2026-07-22T02:00:00Z",
+    ...overrides,
+  };
+}
+
+/** One stored telemetry event (GET /api/v1/events shape). */
+export function makeEvent(overrides: Partial<ObservatoryEvent> = {}): ObservatoryEvent {
+  return {
+    id: "00000000-0000-4000-8000-000000000001",
+    collector_id: "RPSG01",
+    timestamp: "2026-07-22T05:00:00Z",
+    event_type: "heartbeat",
+    payload: { collector_type: "raspberry", collector_version: "0.3.1", failures_total: 0 },
+    schema_version: 1,
+    received_at: "2026-07-22T05:00:01Z",
+    ...overrides,
+  };
+}
+
+/** Docker telemetry snapshot shaped like the live RPSG01 payload (trimmed). */
+export function makeDockerStatus(overrides: Partial<TelemetrySnapshot> = {}): TelemetrySnapshot {
+  return {
+    fleet_id: "RPSG01",
+    event_type: "docker_status",
+    timestamp: "2026-07-22T05:00:00Z",
+    received_at: "2026-07-22T05:00:01Z",
+    schema_version: 1,
+    payload: {
+      daemon_running: true,
+      containers_total: 1,
+      containers_running: 1,
+      containers_failed: 0,
+      restart_count_total: 0,
+      containers: [
+        {
+          name: "bitaxe-exporter",
+          image: "bitaxe-monitoring-bitaxe-exporter",
+          status: "running",
+          exit_code: 0,
+          restart_count: 0,
+          started_at: "2026-07-20T10:00:00Z",
+          uptime_seconds: 154_800,
+          network_mode: "bitaxe-monitoring_default",
+          networks: ["bitaxe-monitoring_default"],
+          cpu_percent: 0.42,
+          memory_percent: 1.8,
+          memory_usage: "68MiB / 3.7GiB",
+          network_rx_bytes: 21_000_000,
+          network_tx_bytes: 1_440,
+        },
+      ],
+    },
     ...overrides,
   };
 }

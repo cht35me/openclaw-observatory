@@ -6,7 +6,7 @@
  */
 import { useQueries, useQuery } from "@tanstack/react-query";
 
-import { getFleetAsset, getHostInventory, listFleet } from "@/api/endpoints";
+import { getDockerStatus, getFleetAsset, getHostInventory, listFleet } from "@/api/endpoints";
 import { POLL_INTERVALS } from "@/api/queryClient";
 import { queryKeys } from "@/api/queryKeys";
 import type { FleetAssetView, HostInventoryRecord } from "@/types";
@@ -37,6 +37,19 @@ export function useHostInventory(fleetId: string) {
     queryKey: queryKeys.hostInventory(fleetId),
     queryFn: ({ signal }) => getHostInventory(fleetId, signal),
     refetchInterval: POLL_INTERVALS.inventory,
+  });
+}
+
+/**
+ * Latest docker_status telemetry for one host (M004 PR3). A 404 means
+ * "no docker telemetry reported" — a normal condition (assets without the
+ * docker capability), branched on via isNotFoundError, never retried.
+ */
+export function useDockerStatus(fleetId: string) {
+  return useQuery({
+    queryKey: queryKeys.dockerStatus(fleetId),
+    queryFn: ({ signal }) => getDockerStatus(fleetId, signal),
+    refetchInterval: POLL_INTERVALS.dockerStatus,
   });
 }
 

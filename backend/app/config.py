@@ -106,6 +106,13 @@ class Settings(BaseSettings):
     # Tests disable it for determinism; production keeps the default.
     background_tasks_enabled: bool = True
 
+    # --- Frontend SPA serving (M004 PR3, app/spa.py) ---
+    # Directory holding the Vite production build. Empty = the repository
+    # default (frontend/dist next to backend/). Serving is conditional on
+    # <dir>/index.html existing — a deployment without a built frontend runs
+    # exactly as before (the mount simply never happens).
+    frontend_dist_dir: str = ""
+
     # --- Health-score thresholds (M003 §9) ---
     health_cpu_temp_warning_c: float = 70.0
     health_cpu_temp_critical_c: float = 80.0

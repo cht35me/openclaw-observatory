@@ -43,6 +43,7 @@ from app.services.pipeline import build_pipeline
 from app.services.registry import RegistryService
 from app.services.seed import seed_registry
 from app.services.startup_event import record_service_start
+from app.spa import mount_frontend, resolve_dist_dir
 from app.storage.base import (
     EventStorage,
     HostInventoryStorage,
@@ -194,6 +195,11 @@ def create_app(
     app.include_router(prometheus_router)
     for router in v1_routers:
         app.include_router(router)
+
+    # M004 PR3: same-origin SPA serving. Mounted after every router so route
+    # precedence is structural (Starlette matches in registration order) —
+    # /api/*, /health, /metrics, /monitor always win. No-op without a build.
+    mount_frontend(app, resolve_dist_dir(settings.frontend_dist_dir))
     return app
 
 

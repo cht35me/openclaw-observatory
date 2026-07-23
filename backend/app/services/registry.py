@@ -74,6 +74,9 @@ class RegistryService:
             collector_version = payload.get("collector_version")
             collector_type = payload.get("collector_type")
             failures = payload.get("failures_total")
+            uptime = payload.get("uptime_seconds")
+            if isinstance(failures, int) and not isinstance(failures, bool):
+                collector_failures = failures
             heartbeat = HeartbeatInfo(
                 timestamp=heartbeat_event.timestamp,
                 received_at=heartbeat_event.received_at,
@@ -83,10 +86,17 @@ class RegistryService:
                 ),
                 collector_type=(collector_type if isinstance(collector_type, str) else None),
                 schema_version=heartbeat_event.schema_version,
+                # M004 PR3 (additive): surface collector process uptime and
+                # cumulative failures from the heartbeat payload. Tolerant of
+                # absence/odd types — older payloads simply yield null.
+                uptime_seconds=(
+                    float(uptime)
+                    if isinstance(uptime, (int, float)) and not isinstance(uptime, bool)
+                    else None
+                ),
+                failures_total=collector_failures,
             )
             heartbeat_age = (now - heartbeat_event.timestamp).total_seconds()
-            if isinstance(failures, int) and not isinstance(failures, bool):
-                collector_failures = failures
 
         if heartbeat is None:
             connectivity = Connectivity.UNKNOWN

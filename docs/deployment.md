@@ -276,6 +276,41 @@ runtime). After any host reboot, verify — in order:
    `journalctl --user -b -1 -n 1` shows the previous boot — persistent
    journald survived the reboot (see “Persistent journald” above).
 
+## 13. Frontend Build and Serving (M004 PR3)
+
+The operations console (React SPA, [frontend-architecture.md](frontend-architecture.md))
+is served **same-origin by the backend itself** — no new process, port, or
+reverse proxy (design §7 of that document; `backend/app/spa.py`).
+
+**Build (on the deploy host or in CI):**
+
+```bash
+cd frontend
+npm ci          # locked dependencies only (package-lock.json)
+npm run build   # tsc -b && vite build → frontend/dist/
+```
+
+**Serving flow:**
+
+1. At startup, `create_app()` mounts `frontend/dist` at `/` **only if
+   `dist/index.html` exists**. No build → no mount → the backend behaves
+   exactly as before (the deploy scripts and test suite need no change).
+2. The dist location can be overridden with the `FRONTEND_DIST_DIR`
+   environment variable (empty = repository default `frontend/dist`).
+3. Route precedence is structural: `/api/*`, `/health`, `/metrics`,
+   `/monitor` are registered before the mount and always win. Missing
+   assets return hard 404s; unknown `/api/*` paths keep the JSON 404;
+   only extension-less navigation paths (e.g. `/fleet/RPSG01`) fall back
+   to `index.html`.
+4. The SPA inherits the backend's network exposure (loopback/tailnet only,
+   SD-003) and its auth model (SD-017: a dedicated `UI01` key entered in
+   the Settings screen). `/monitor` remains the zero-JS emergency panel.
+
+**Upgrade note:** rebuilding the frontend does not require a backend
+restart for asset changes (files are read per request), but a restart is
+needed when the mount must appear on a host that previously had no
+`dist/` (the mount decision is made at startup).
+
 ---
 
 Related: [architecture.md](architecture.md) · [security.md](security.md) ·

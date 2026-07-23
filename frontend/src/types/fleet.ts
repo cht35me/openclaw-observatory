@@ -25,6 +25,10 @@ export interface HeartbeatInfo {
   collector_version: string | null;
   collector_type: string | null;
   schema_version: number | null;
+  /** Collector process uptime (M004 PR3 additive) — null for pre-M004 events. */
+  uptime_seconds: number | null;
+  /** Cumulative collector failures (M004 PR3 additive) — null for pre-M004 events. */
+  failures_total: number | null;
 }
 
 /** Read model returned by GET /api/v1/fleet — identity + derived telemetry. */

@@ -20,10 +20,11 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.api.deps import InventoryStorageDep, RegistryServiceDep
+from app.api.deps import InventoryStorageDep, RegistryServiceDep, StorageDep
 from app.auth import CollectorPrincipal, require_collector
 from app.models.inventory import HostInventoryRecord
 from app.models.registry import FleetAssetView
+from app.models.telemetry import DOCKER_STATUS_EVENT_TYPE, TelemetrySnapshot
 
 router = APIRouter(prefix="/api/v1", tags=["fleet"])
 
@@ -91,3 +92,37 @@ async def get_host_inventory(
             detail="No host inventory reported for this fleet_id yet.",
         )
     return record
+
+
+@router.get(
+    "/fleet/{fleet_id}/docker-status",
+    response_model=TelemetrySnapshot,
+    summary="Fetch the latest Docker telemetry for one node",
+)
+async def get_docker_status(
+    fleet_id: str,
+    registry: RegistryServiceDep,
+    events: StorageDep,
+    _principal: Annotated[CollectorPrincipal, Depends(require_collector)],
+) -> TelemetrySnapshot:
+    """Return the newest ``docker_status`` event for one host (M004 PR3).
+
+    Constrained-by-design (supervisor gate): this is a dedicated route for
+    exactly one allowlisted telemetry type, not a generic event browser — the
+    event stream itself stays internal. 404 when the Fleet ID is unknown
+    *or* the host has not reported Docker telemetry yet (a normal condition
+    for assets without the docker capability); consumers branch on it,
+    never retry.
+    """
+    if await registry.get_view(fleet_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Unknown fleet_id.",
+        )
+    event = await events.latest_event(fleet_id, DOCKER_STATUS_EVENT_TYPE)
+    if event is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No docker telemetry reported for this fleet_id yet.",
+        )
+    return TelemetrySnapshot.from_event(fleet_id, event)

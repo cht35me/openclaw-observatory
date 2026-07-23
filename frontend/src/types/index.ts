@@ -23,3 +23,4 @@ export type {
 export { MISSION_STATES } from "./mission";
 export type { MissionState, MissionView } from "./mission";
 export type { ObservatoryEvent } from "./event";
+export type { DockerContainer, DockerStatusPayload, TelemetrySnapshot } from "./telemetry";

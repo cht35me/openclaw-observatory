@@ -1,9 +1,14 @@
-"""Telemetry ingestion: ``POST /api/v1/events``.
+"""Telemetry events API: ``POST /api/v1/events`` and ``GET /api/v1/events``.
 
 Authenticated collectors submit validated telemetry events; each event is
 stamped with a UUID and ingestion timestamp and persisted through the storage
 interface. Failure isolation per docs/architecture.md §3: a bad payload or a
 storage outage affects only the failing request, never the pipeline.
+
+The read side (M004 PR3, additive per mission §8) returns recent events
+newest-first with optional exact-match filters — the data source for the
+frontend Events timeline (mission §6). Reads require the same authentication
+as every other v1 endpoint (docs/security.md §3: no anonymous reads, ever).
 """
 
 from __future__ import annotations
@@ -11,7 +16,7 @@ from __future__ import annotations
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from app.api.deps import MetricsDep, PipelineDep, StorageDep
 from app.auth import CollectorPrincipal, require_collector
@@ -25,6 +30,49 @@ _logger = logging.getLogger("observatory.ingestion")
 # include) so the matched route template — used for metric labels and the
 # OpenAPI schema — always carries the full versioned path.
 router = APIRouter(prefix="/api/v1", tags=["ingestion"])
+
+#: Bounds for the read route: one bounded query, never an unbounded scan.
+DEFAULT_EVENTS_LIMIT = 100
+MAX_EVENTS_LIMIT = 500
+
+
+@router.get(
+    "/events",
+    response_model=list[Event],
+    summary="List recent telemetry events (newest first)",
+)
+async def list_events(
+    storage: StorageDep,
+    _principal: Annotated[CollectorPrincipal, Depends(require_collector)],
+    collector_id: Annotated[
+        str | None,
+        Query(max_length=128, description="Exact-match filter on the source asset."),
+    ] = None,
+    event_type: Annotated[
+        str | None,
+        Query(max_length=128, description="Exact-match filter on the event type."),
+    ] = None,
+    limit: Annotated[
+        int,
+        Query(ge=1, le=MAX_EVENTS_LIMIT, description="Maximum number of events returned."),
+    ] = DEFAULT_EVENTS_LIMIT,
+) -> list[Event]:
+    """Return recent events, newest first (M004 PR3, additive read).
+
+    Any authenticated fleet identity may read (same policy as the registry
+    routes; per-role authorization arrives with the RBAC milestone). Filters
+    are exact matches; an unknown ``collector_id`` or ``event_type`` simply
+    yields an empty list — the event stream is schema-free by design.
+    """
+    try:
+        return await storage.query_events(
+            collector_id=collector_id, event_type=event_type, limit=limit
+        )
+    except StorageError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Storage backend unavailable; retry later.",
+        ) from None
 
 
 @router.post(

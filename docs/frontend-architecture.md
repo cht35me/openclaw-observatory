@@ -145,16 +145,15 @@ navigable with visible focus rings; semantic landmarks (`<nav>`, `<main>`,
   blank panels.
 - Query retry: 2 retries with backoff for network/5xx; none for 4xx.
 
-## 7. Proposal (a): Serving Model — **Proposed — Gate review at PR1**
+## 7. Serving Model — **Implemented in PR3 (design approved at the PR1 gate)**
 
 **Development:** Vite dev server proxies `/api` and `/health` to
 `http://127.0.0.1:8000` (backend on loopback). Same-origin in the browser ⇒
 no CORS anywhere.
 
-**Production (proposal, implemented in PR3, not now):** the FastAPI backend
-mounts the built SPA via `StaticFiles` (additive change only — e.g.
-`app.mount` of `frontend/dist` at `/ui` or `/`, with SPA-fallback to
-`index.html`). Rationale:
+**Production (implemented in PR3, `backend/app/spa.py`):** the FastAPI
+backend mounts the built SPA (`frontend/dist`) at `/` via a narrow
+`StaticFiles` subclass (additive change only). Rationale:
 
 - **Same-origin** with the API ⇒ zero CORS configuration, no extra headers,
   no preflight traffic on the Pi.
@@ -168,10 +167,12 @@ mounts the built SPA via `StaticFiles` (additive change only — e.g.
   stays zero-backend-change. Until then the frontend runs via `vite dev`
   or `vite preview` on the LAN.
 
-**Mount design (supervisor gate requirements, binding for the PR3
-implementation):**
+**Mount design (supervisor gate requirements — implemented and
+regression-tested in `backend/tests/test_spa.py`):**
 
-- **Routing precedence is preserved:** `/api/*`, `/health`, `/metrics`,
+- **Routing precedence is preserved (structurally):** the mount registers
+  *after* every router in `create_app`, and Starlette matches in
+  registration order — `/api/*`, `/health`, `/metrics`,
   `/monitor`, and `/docs`/`/openapi.json` are registered API routes and
   always win; the SPA mount only ever serves paths no API route claims.
 - **No blanket SPA fallback.** Asset requests (`/assets/*`, `/favicon.svg`,
@@ -181,7 +182,8 @@ implementation):**
   paths (`/fleet/RPSG01`, `/settings`, …). Unknown `/api/...` paths keep
   returning the backend's own 404, never the SPA.
 - **Frontend is optional at runtime:** the mount is conditional on
-  `frontend/dist/` existing. The backend test suite (and any deployment
+  `<dist>/index.html` existing (`frontend/dist` by default; overridable via
+  the `FRONTEND_DIST_DIR` setting). The backend test suite (and any deployment
   without a built frontend) must remain fully runnable and green with no
   `dist/` present — CI enforces this implicitly because backend jobs never
   build the frontend.
@@ -288,24 +290,52 @@ state when absent — partial inventory is expected, not an error. The
 inventory route's **404 is a normal condition** ("nothing reported yet", the
 case for every agent/service asset) and is branched on, never retried.
 
-**Known gaps (rendered as honest “Not reported”, never fake values):**
+**Known gaps — statuses updated at PR3 (rendered as honest “Not
+reported” until resolved, never fake values):**
 
-1. **Service/collector uptime** — heartbeat payloads carry
+1. **Service/collector uptime** — **RESOLVED (PR3).** Heartbeat payloads carry
    `uptime_seconds` (and `failures_total`), but the registry read model
-   (`HeartbeatInfo`) drops both, so `GET /api/v1/fleet` cannot answer
-   "how long has this collector been up". *Additive proposal:* include
-   `uptime_seconds`/`failures_total` in `HeartbeatInfo`.
-2. **Restart count, CPU, RAM, RX/TX per service** — collected as
+   (`HeartbeatInfo`) dropped both. PR3 adds optional
+   `uptime_seconds`/`failures_total` to `HeartbeatInfo` (null-tolerant:
+   pre-M004 events simply yield `null`); `/services` renders them.
+2. **Restart count, CPU, RAM, RX/TX per service** — **RESOLVED (PR3),
+   deliberately narrower than proposed.** Collected as
    `docker_status` telemetry (consumed by `/monitor`), but no REST read
-   endpoint exposes latest per-type telemetry. *Additive proposal:*
-   `GET /api/v1/fleet/{id}/telemetry/{event_type}` (latest event payload).
-3. **Running services (systemd)** — not collected at all today; the host
+   endpoint exposed latest per-type telemetry. Instead of the generic
+   `GET /fleet/{id}/telemetry/{event_type}` proposal, PR3 ships a
+   dedicated `GET /api/v1/fleet/{id}/docker-status` route behind an
+   explicit server-side allowlist (`EXPOSED_TELEMETRY_TYPES`) — the raw
+   event stream stays internal; new types are exposed one review at a
+   time. `/services` maps containers to services by strict name-slug
+   equality (a wrong match is worse than a gap); node details render the
+   full container list.
+3. **Running services (systemd)** — **DEFERRED (unchanged).** Not
+   collected at all today; the host
    collector reports hardware/os/storage/network/maintenance only.
    *Proposal:* an additive `services` inventory section in the host
    collector (collector change, no backend schema change needed).
+   Tracked as a roadmap follow-up (see roadmap.md, Continuous /
+   follow-ups); the UI keeps its honest “Not reported” placeholder.
 
-All three proposals await supervisor decision (recorded in the M004 PR2
-description); none is implemented in PR2.
+Items 1–2 were approved at the PR2 gate and implemented in PR3; item 3
+remains open.
+
+### Events timeline data source (PR3)
+
+`/events` is fed by the additive `GET /api/v1/events` read route
+(authenticated, newest-first, exact-match `collector_id`/`event_type`
+filters, `limit` 1–500, default 100). The timeline fetches one bounded
+page (200) every 15 s and applies the mission's five filter chips
+client-side, so chip toggles are instant and all filter combinations
+share a single poll. The chip → event-type/severity mapping is the
+documented contract in `frontend/src/features/events/model.ts`:
+*service* → `service_start`/`mission_update`; *collector* →
+`system_metrics`/`docker_status`/`host_inventory`/`agent_status`;
+*heartbeat* → `heartbeat`; *warning*/*error* → derived severity
+(`asset_offline` → error; docker daemon down/failed containers or
+heartbeat `failures_total > 0` → warning). Unknown event types stay
+visible under “All” — the stream is schema-free and the timeline never
+silently drops data.
 
 ## 12. Out of Scope (unchanged from mission)
 
