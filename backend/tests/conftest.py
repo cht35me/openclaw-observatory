@@ -22,6 +22,21 @@ from app.storage.memory import (
     InMemoryRegistryStorage,
 )
 
+
+@pytest.fixture(autouse=True)
+def _isolate_dotenv(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the suite hermetic w.r.t. any ambient ``.env`` file (M003.6 follow-up).
+
+    ``Settings`` reads ``env_file=".env"`` relative to the *current working
+    directory*, so running pytest from the repository root used to leak the
+    root ``.env`` (docker-compose operator config) into ``load_settings()``
+    tests. Nulling the env-file source for every test makes the suite pass
+    identically from ``backend/`` and from the repository root; production
+    and local-dev behaviour are unchanged.
+    """
+    monkeypatch.setitem(Settings.model_config, "env_file", None)
+
+
 #: Key → identity bindings for the test app (SD-017; never real credentials).
 #: demo/other-collector exercise generic ingestion; RPSG01/A001 are seeded
 #: Fleet Registry identities used by the M003 heartbeat/mission tests.
